@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -8,25 +9,35 @@ from fastapi import FastAPI, Request, Depends, status, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
-from sqlalchemy import text
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
 import models
 from database import get_db, engine
 
+# Configuración de logs para depuración en Render
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("gastronomia")
+
+# 1. Garantizar la existencia de 'static' ANTES de iniciar FastAPI/StaticFiles
+os.makedirs("static", exist_ok=True)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Manejador del ciclo de vida de la aplicación."""
     if engine:
-        models.Base.metadata.create_all(bind=engine)
-    os.makedirs("static", exist_ok=True)
+        try:
+            models.Base.metadata.create_all(bind=engine)
+            logger.info("Tablas de la BD verificadas/creadas exitosamente.")
+        except Exception as e:
+            logger.error(f"Error al inicializar la base de datos en arranque: {e}")
     yield
 
 app = FastAPI(
     title="Gestión de Aseo Gastronomía",
     description="Sistema para registro de checklist de aseo, control de talleres y asignación de alumnos.",
-    version="1.3.0",
+    version="1.3.1",
     lifespan=lifespan
 )
 
@@ -35,26 +46,26 @@ templates = Jinja2Templates(directory="templates")
 
 
 # ==========================================
-# ESQUEMAS PYDANTIC
+# ESQUEMAS PYDANTIC (Pydantic V2)
 # ==========================================
 class DocenteOut(BaseModel):
     rut: str
     nombre: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class SeccionOut(BaseModel):
     cod_asignatura: Optional[str] = None
     asignatura: str
     seccion: str
 
+    model_config = ConfigDict(from_attributes=True)
+
 class AlumnoOut(BaseModel):
     rut: str
     nombre: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==========================================
@@ -176,6 +187,7 @@ async def guardar_checklist(request: Request, db: Session = Depends(get_db)):
         db.commit()
     except SQLAlchemyError as e:
         db.rollback()
+        logger.error(f"Error en BD al guardar checklist: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error de base de datos al guardar la revisión: {str(e)}"
@@ -190,14 +202,13 @@ async def guardar_checklist(request: Request, db: Session = Depends(get_db)):
 
 @app.get("/api/docentes", response_model=List[DocenteOut], tags=["API Selectores"])
 def obtener_docentes(db: Session = Depends(get_db)):
-    """Retorna el listado de docentes disponibles para los desplegables en cascada."""
-    docentes = db.query(models.Docente).order_by(models.Docente.nombre).all()
-    return [{"rut": d.rut, "nombre": d.nombre} for d in docentes]
+    """Retorna el listado de docentes ordenados por nombre."""
+    return db.query(models.Docente).order_by(models.Docente.nombre).all()
 
 
 @app.get("/api/docentes/{rut_docente}/secciones", response_model=List[SeccionOut], tags=["API Selectores"])
 def obtener_secciones_por_docente(rut_docente: str, db: Session = Depends(get_db)):
-    """Obtiene las secciones asignadas a un docente específico según su RUT."""
+    """Obtiene las secciones asignadas a un docente según su RUT."""
     secciones = (
         db.query(models.Seccion)
         .filter(models.Seccion.rut_docente == rut_docente)
