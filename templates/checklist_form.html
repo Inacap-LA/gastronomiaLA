@@ -6,99 +6,133 @@
     <title>Checklist - {{ taller.nombre }}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .card-custom {
+            border: none;
+            border-radius: 0.75rem;
+        }
+        .status-select-conforme {
+            color: #198754 !important;
+            font-weight: 600;
+        }
+        .status-select-noconforme {
+            color: #dc3545 !important;
+            font-weight: 600;
+            background-color: #fff8f8;
+        }
+        .sticky-actions {
+            position: sticky;
+            bottom: 1rem;
+            z-index: 1020;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(8px);
+            border-radius: 0.75rem;
+        }
+    </style>
 </head>
 <body class="bg-light">
 
     <!-- Navegación -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4 shadow-sm">
         <div class="container">
-            <a class="navbar-brand fw-bold" href="/">
-                <i class="bi bi-clipboard-check-fill me-2"></i>Gestión de Aseo Gastronomía
+            <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="/">
+                <i class="bi bi-clipboard-check-fill text-warning fs-4"></i>
+                <span>Gestión de Aseo Gastronomía</span>
+            </a>
+            <a href="/" class="btn btn-outline-light btn-sm ms-auto">
+                <i class="bi bi-house-door me-1"></i> Volver al Inicio
             </a>
         </div>
     </nav>
 
     <div class="container mb-5">
+        
+        <!-- Banner Modo Borrador -->
         {% if checklist and checklist.estado == 'BORRADOR' %}
-        <div class="alert alert-warning alert-dismissible fade show d-flex align-items-center" role="alert">
-            <i class="bi bi-exclamation-triangle-fill flex-shrink-0 me-2 fs-5"></i>
+        <div class="alert alert-warning alert-dismissible fade show d-flex align-items-center shadow-sm mb-4" role="alert">
+            <i class="bi bi-pencil-square flex-shrink-0 me-3 fs-4 text-warning-emphasis"></i>
             <div>
-                <strong>Modo Borrador:</strong> Estás editando una pauta guardada previamente. Puedes hacer cambios y volver a guardar o finalizar el proceso.
+                <strong>Modo Borrador:</strong> Estás editando una pauta guardada previamente. Puedes actualizar datos y volver a guardar o enviarla formalmente a revisión.
             </div>
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
         {% endif %}
 
-        <div class="d-flex justify-content-between align-items-center mb-3">
+        <!-- Encabezado de la Página -->
+        <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
             <div>
-                <h2 class="h3 mb-0 text-primary fw-bold">
-                    Checklist de Limpieza
+                <h2 class="h3 mb-1 text-primary fw-bold d-flex align-items-center gap-2">
+                    <i class="bi bi-journal-text"></i> Checklist de Limpieza y Control
                 </h2>
-                <p class="text-muted mb-0">Taller: <strong>{{ taller.nombre }}</strong></p>
+                <p class="text-muted mb-0">Taller: <strong class="text-dark">{{ taller.nombre }}</strong></p>
             </div>
-            <a href="/" class="btn btn-outline-secondary btn-sm">
-                <i class="bi bi-arrow-left me-1"></i>Volver al Inicio
-            </a>
+            <span class="badge bg-white text-primary border shadow-sm px-3 py-2 fs-6">
+                <i class="bi bi-grid-3x3-gap-fill me-1"></i> {{ taller.actividades|length }} Ítems
+            </span>
         </div>
 
         <form action="/guardar-checklist" method="POST" id="checklistForm">
-            <!-- ID oculto para actualización de borradores -->
+            <!-- Campos ocultos -->
             <input type="hidden" name="checklist_id" value="{{ checklist.id if checklist else '' }}">
             <input type="hidden" name="taller_id" value="{{ taller.id }}">
+            <input type="hidden" id="accionInput" name="accion" value="finalizar">
             
-            <!-- Información General -->
-            <div class="card mb-4 shadow-sm border-0">
-                <div class="card-header bg-white py-3">
+            <!-- Datos Generales -->
+            <div class="card card-custom shadow-sm mb-4">
+                <div class="card-header bg-white py-3 border-0">
                     <h5 class="card-title mb-0 text-secondary fs-6 fw-bold">
-                        <i class="bi bi-info-circle me-1"></i> INFORMACIÓN GENERAL
+                        <i class="bi bi-info-circle-fill me-2 text-primary"></i>1. INFORMACIÓN GENERAL
                     </h5>
                 </div>
-                <div class="card-body row g-3">
-                    <div class="col-md-3">
-                        <label for="select-docente" class="form-label fw-semibold">
-                            Docente <span class="text-danger">*</span>
-                        </label>
-                        <select id="select-docente" name="docente" class="form-select" required aria-label="Seleccionar Docente">
-                            <option value="">Cargando docentes...</option>
-                        </select>
-                    </div>
+                <div class="card-body pt-0">
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <label for="select-docente" class="form-label fw-semibold small text-secondary">
+                                Docente <span class="text-danger">*</span>
+                            </label>
+                            <select id="select-docente" name="docente" class="form-select" required>
+                                <option value="">Cargando docentes...</option>
+                            </select>
+                        </div>
 
-                    <div class="col-md-3">
-                        <label for="select-seccion" class="form-label fw-semibold">
-                            Clase / Asignatura <span class="text-danger">*</span>
-                        </label>
-                        <select id="select-seccion" name="clase" class="form-select" disabled required aria-label="Seleccionar Clase">
-                            <option value="">-- Primero elija docente --</option>
-                        </select>
-                    </div>
+                        <div class="col-md-3">
+                            <label for="select-seccion" class="form-label fw-semibold small text-secondary">
+                                Clase / Asignatura <span class="text-danger">*</span>
+                            </label>
+                            <select id="select-seccion" name="clase" class="form-select" disabled required>
+                                <option value="">-- Primero elija docente --</option>
+                            </select>
+                        </div>
 
-                    <div class="col-md-3">
-                        <label for="fecha" class="form-label fw-semibold">
-                            Fecha <span class="text-danger">*</span>
-                        </label>
-                        <input type="date" id="fecha" name="fecha" value="{{ fecha_actual }}" class="form-control" required>
-                    </div>
+                        <div class="col-md-3">
+                            <label for="fecha" class="form-label fw-semibold small text-secondary">
+                                Fecha <span class="text-danger">*</span>
+                            </label>
+                            <input type="date" id="fecha" name="fecha" value="{{ fecha_actual }}" class="form-control" required>
+                        </div>
 
-                    <div class="col-md-3">
-                        <label for="encargado_taller" class="form-label fw-semibold">
-                            Encargado de Taller <span class="text-danger">*</span>
-                        </label>
-                        <input type="text" id="encargado_taller" name="encargado_taller" class="form-control" placeholder="Nombre del encargado" value="{{ checklist.encargado_taller if checklist and checklist.encargado_taller else '' }}" required>
+                        <div class="col-md-3">
+                            <label for="encargado_taller" class="form-label fw-semibold small text-secondary">
+                                Encargado de Taller <span class="text-danger">*</span>
+                            </label>
+                            <input type="text" id="encargado_taller" name="encargado_taller" class="form-control" 
+                                   placeholder="Nombre del encargado" 
+                                   value="{{ checklist.encargado_taller if checklist and checklist.encargado_taller else '' }}" required>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Tabla de Actividades -->
-            <div class="card shadow-sm border-0 mb-4">
-                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+            <!-- Tabla de Actividades de Limpieza -->
+            <div class="card card-custom shadow-sm mb-4">
+                <div class="card-header bg-white py-3 border-0 d-flex justify-content-between align-items-center">
                     <h5 class="card-title mb-0 text-secondary fs-6 fw-bold">
-                        <i class="bi bi-list-check me-1"></i> ACTIVIDADES DE LIMPIEZA Y REVISIÓN
+                        <i class="bi bi-list-check me-2 text-primary"></i>2. EVALUACIÓN Y ASIGNACIÓN DE ACTIVIDADES
                     </h5>
-                    <span class="badge bg-primary rounded-pill px-3 py-2">{{ taller.actividades|length }} Actividades</span>
                 </div>
-                <div class="table-responsive p-0">
+                <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0">
-                        <thead class="table-dark">
+                        <thead class="table-light small text-uppercase text-secondary">
                             <tr>
                                 <th style="width: 35%;" class="ps-3">Actividad</th>
                                 <th style="width: 25%;">Alumno Encargado</th>
@@ -110,21 +144,21 @@
                             {% for act in taller.actividades %}
                             <tr>
                                 <td class="ps-3">
-                                    <span class="fw-medium text-dark">{{ act }}</span>
+                                    <span class="fw-medium text-dark d-block">{{ act }}</span>
                                 </td>
                                 <td>
-                                    <select name="alumno_{{ loop.index0 }}" id="alumno_{{ loop.index0 }}" class="form-select form-select-sm select-alumno" disabled aria-label="Alumno Encargado">
+                                    <select name="alumno_{{ loop.index0 }}" id="alumno_{{ loop.index0 }}" class="form-select form-select-sm select-alumno" disabled>
                                         <option value="">-- Seleccione sección primero --</option>
                                     </select>
                                 </td>
                                 <td>
-                                    <select name="estado_{{ loop.index0 }}" id="estado_{{ loop.index0 }}" class="form-select form-select-sm fw-semibold">
+                                    <select name="estado_{{ loop.index0 }}" id="estado_{{ loop.index0 }}" class="form-select form-select-sm status-select status-select-conforme" onchange="actualizarEstiloEstado(this)">
                                         <option value="CONFORME" class="text-success fw-bold">✓ Conforme</option>
                                         <option value="NO CONFORME" class="text-danger fw-bold">✕ No Conforme</option>
                                     </select>
                                 </td>
                                 <td class="pe-3">
-                                    <input type="text" name="obs_{{ loop.index0 }}" id="obs_{{ loop.index0 }}" class="form-control form-control-sm" placeholder="Detalle u observación...">
+                                    <input type="text" name="obs_{{ loop.index0 }}" id="obs_{{ loop.index0 }}" class="form-control form-control-sm" placeholder="Observación opcional...">
                                 </td>
                             </tr>
                             {% endfor %}
@@ -133,35 +167,69 @@
                 </div>
             </div>
 
-            <!-- Botonera Doble Acción -->
-            <div class="d-flex justify-content-end gap-2">
-                <a href="/" class="btn btn-secondary px-4">
-                    <i class="bi bi-x-circle me-1"></i>Cancelar
-                </a>
-                
-                <!-- Guardar Borrador -->
-                <button type="submit" name="accion" value="borrador" class="btn btn-warning px-4 fw-semibold text-dark">
-                    <i class="bi bi-save me-1"></i>Guardar Borrador
-                </button>
-                
-                <!-- Finalizar Definitivo -->
-                <button type="submit" name="accion" value="finalizar" class="btn btn-success px-4 fw-semibold">
-                    <i class="bi bi-check-circle me-1"></i>Finalizar y Enviar Checklist
-                </button>
+            <!-- Barra Flotante de Acciones -->
+            <div class="card card-custom shadow-sm sticky-actions p-3 border">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                    <a href="/" class="btn btn-outline-secondary px-4">
+                        <i class="bi bi-x-circle me-1"></i> Cancelar
+                    </a>
+                    
+                    <div class="d-flex gap-2">
+                        <!-- Guardar Borrador (Sin validación estricta de campos requeridos) -->
+                        <button type="submit" id="btnBorrador" class="btn btn-warning px-4 fw-semibold text-dark">
+                            <i class="bi bi-save me-1"></i> Guardar Borrador
+                        </button>
+                        
+                        <!-- Enviar a Pañol / Finalizar (Con validación requerida) -->
+                        <button type="submit" id="btnFinalizar" class="btn btn-success px-4 fw-bold">
+                            <i class="bi bi-send-check me-1"></i> Enviar a Revisión de Pañol
+                        </button>
+                    </div>
+                </div>
             </div>
         </form>
     </div>
 
-    <!-- Script de Precarga y Manejo de Formulario -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
     const checklistData = {{ checklist_json | safe if checklist_json else 'null' }};
 
+    function actualizarEstiloEstado(selectEl) {
+        if (selectEl.value === 'NO CONFORME') {
+            selectEl.classList.remove('status-select-conforme');
+            selectEl.classList.add('status-select-noconforme');
+        } else {
+            selectEl.classList.remove('status-select-noconforme');
+            selectEl.classList.add('status-select-conforme');
+        }
+    }
+
     document.addEventListener("DOMContentLoaded", async () => {
+        const form = document.getElementById("checklistForm");
         const selectDocente = document.getElementById("select-docente");
         const selectSeccion = document.getElementById("select-seccion");
         const selectsAlumno = document.querySelectorAll(".select-alumno");
+        const accionInput = document.getElementById("accionInput");
+        const btnBorrador = document.getElementById("btnBorrador");
+        const btnFinalizar = document.getElementById("btnFinalizar");
 
-        // 1. Cargar docentes
+        // Manejo de botones de envío (Borrador vs Finalizar/Pañol)
+        btnBorrador.addEventListener("click", () => {
+            accionInput.value = "borrador";
+            form.novalidate = true; // Desactiva validación HTML5 para guardar borrador parcial
+            // Remover 'required' temporalmente para permitir guardado incompleto
+            form.querySelectorAll("[required]").forEach(el => el.dataset.wasRequired = "true");
+            form.querySelectorAll("[required]").forEach(el => el.removeAttribute("required"));
+        });
+
+        btnFinalizar.addEventListener("click", () => {
+            accionInput.value = "enviar_panol";
+            // Restaurar atributo 'required' para validación completa
+            form.querySelectorAll("[data-was-required='true']").forEach(el => el.setAttribute("required", "required"));
+            form.novalidate = false;
+        });
+
+        // 1. Cargar Docentes
         try {
             const resDocentes = await fetch("/api/docentes");
             if (!resDocentes.ok) throw new Error("Error al consultar docentes");
@@ -176,7 +244,7 @@
                 selectDocente.appendChild(opt);
             });
 
-            // Si es un borrador cargado, seleccionar el docente guardado
+            // Re-selección si viene de un Borrador
             if (checklistData && checklistData.rut_docente) {
                 for (let opt of selectDocente.options) {
                     if (opt.dataset.rut === checklistData.rut_docente || opt.value.includes(checklistData.rut_docente)) {
@@ -218,7 +286,7 @@
 
             try {
                 selectSeccion.disabled = true;
-                selectSeccion.innerHTML = '<option value="">Cargando secciones...</option>';
+                selectSeccion.innerHTML = '<option value="">⏳ Cargando secciones...</option>';
                 
                 const resSecciones = await fetch(`/api/docentes/${encodeURIComponent(rutDocente)}/secciones`);
                 const secciones = await resSecciones.json();
@@ -233,7 +301,6 @@
                 });
                 selectSeccion.disabled = false;
 
-                // Si es borrador, seleccionar la sección guardada
                 if (checklistData && checklistData.codigo_seccion) {
                     for (let opt of selectSeccion.options) {
                         if (opt.dataset.codigoSeccion === checklistData.codigo_seccion || opt.value.startsWith(checklistData.codigo_seccion)) {
@@ -260,7 +327,7 @@
             try {
                 selectsAlumno.forEach(s => {
                     s.disabled = true;
-                    s.innerHTML = '<option value="">Cargando alumnos...</option>';
+                    s.innerHTML = '<option value="">⏳ Cargando alumnos...</option>';
                 });
 
                 const resAlumnos = await fetch(`/api/secciones/${encodeURIComponent(seccionCodigo)}/alumnos`);
@@ -269,7 +336,7 @@
                 selectsAlumno.forEach((select, idx) => {
                     select.innerHTML = '<option value="">-- Seleccione un alumno --</option>';
                     if (alumnos.length === 0) {
-                        select.innerHTML = '<option value="">Sin alumnos inscritos</option>';
+                        select.innerHTML = '<option value="">Sin alumnos registrados</option>';
                     } else {
                         alumnos.forEach(a => {
                             const opt = document.createElement("option");
@@ -280,7 +347,7 @@
                         select.disabled = false;
                     }
 
-                    // Si es borrador, precargar el alumno, estado y observación previamente seleccionados
+                    // Restauración de datos guardados previamente
                     if (checklistData && checklistData.actividades && checklistData.actividades[idx]) {
                         const actSaved = checklistData.actividades[idx];
                         if (actSaved.alumno_encargado) {
@@ -289,6 +356,7 @@
                         const elemEstado = document.getElementById(`estado_${idx}`);
                         if (elemEstado && actSaved.estado) {
                             elemEstado.value = actSaved.estado;
+                            actualizarEstiloEstado(elemEstado);
                         }
                         const elemObs = document.getElementById(`obs_${idx}`);
                         if (elemObs && actSaved.observaciones !== undefined) {

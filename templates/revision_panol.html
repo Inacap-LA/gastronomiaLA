@@ -2,86 +2,152 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Revisión Pañol - Checklist #{{ checklist.id }}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Revisión de Pañol - Checklist #{{ checklist.id }}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
 </head>
 <body class="bg-light">
-<div class="container py-4">
-    <div class="card shadow-sm border-0 mb-4">
-        <div class="card-header bg-warning text-dark d-flex justify-content-between align-items-center">
-            <h5 class="mb-0"><i class="bi bi-clipboard-check me-2"></i> Recepción de Taller - Pañolero</h5>
-            <span class="badge bg-dark">Checklist #{{ checklist.id }}</span>
+    <!-- Navegación -->
+    <nav class="navbar navbar-dark bg-dark mb-4 shadow-sm">
+        <div class="container">
+            <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="/admin">
+                <i class="bi bi-clipboard-check-fill text-warning fs-4"></i>
+                <span>Revisión y Recepción de Pañol</span>
+            </a>
+            <a href="/admin" class="btn btn-outline-light btn-sm">
+                <i class="bi bi-arrow-left me-1"></i> Volver al Panel
+            </a>
         </div>
-        <div class="card-body">
-            <div class="row mb-3">
-                <div class="col-md-3"><strong>Taller:</strong> {{ checklist.taller }}</div>
-                <div class="col-md-3"><strong>RUT Docente:</strong> {{ checklist.rut_docente }}</div>
-                <div class="col-md-3"><strong>Sección:</strong> {{ checklist.codigo_seccion }}</div>
-                <div class="col-md-3"><strong>Fecha:</strong> {{ checklist.fecha }}</div>
-            </div>
+    </nav>
 
-            <form action="/checklist/aprobar-panol/{{ checklist.id }}" method="POST">
-                <!-- Datos del Pañolero -->
-                <div class="row g-3 bg-white p-3 border rounded mb-4">
-                    <div class="col-md-6">
-                        <label class="form-label fw-bold">Nombre Pañolero Recepcionista *</label>
-                        <input type="text" name="nombre_panolero" class="form-control" required placeholder="Ej. Juan Pérez">
+    <div class="container mb-5">
+        <!-- Encabezado del Checklist -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-primary text-white py-3">
+                <h5 class="m-0 fw-bold">
+                    <i class="bi bi-journal-check me-2"></i>Recepción de Taller #{{ checklist.id }} — {{ checklist.taller }}
+                </h5>
+            </div>
+            <div class="card-body p-4">
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <span class="text-muted small d-block">RUT Docente</span>
+                        <strong class="fs-6">{{ checklist.rut_docente or 'N/A' }}</strong>
                     </div>
-                    <div class="col-md-6">
-                        <label class="form-label fw-bold">Observación General de Entrega</label>
-                        <input type="text" name="observacion_panolero" class="form-control" placeholder="Ej. Taller recibido en orden y limpio">
+                    <div class="col-md-3">
+                        <span class="text-muted small d-block">Sección / Asignatura</span>
+                        <strong class="fs-6">{{ checklist.codigo_seccion or 'N/A' }}</strong>
+                    </div>
+                    <div class="col-md-3">
+                        <span class="text-muted small d-block">Fecha Checklist</span>
+                        <strong class="fs-6">{{ checklist.fecha or 'N/A' }}</strong>
+                    </div>
+                    <div class="col-md-3">
+                        <span class="text-muted small d-block">Encargado de Taller (Docente)</span>
+                        <strong class="fs-6">{{ checklist.encargado_taller or 'N/A' }}</strong>
                     </div>
                 </div>
+            </div>
+        </div>
 
-                <!-- Tabla de Doble Checklist -->
-                <h6 class="fw-bold mb-3"><i class="bi bi-list-check me-1"></i> Doble Checklist (Verificación de Actividades)</h6>
+        <!-- Formulario de Contra-Revisión (Doble Checklist) -->
+        <form action="/checklist/aprobar-panol/{{ checklist.id }}" method="POST">
+            
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white py-3">
+                    <h6 class="m-0 fw-bold text-dark">
+                        <i class="bi bi-list-check me-2 text-primary"></i>Evaluación Comparativa (Docente vs. Pañol)
+                    </h6>
+                </div>
                 <div class="table-responsive">
-                    <table class="table table-bordered table-hover align-middle bg-white">
-                        <thead class="table-dark">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light small text-uppercase">
                             <tr>
-                                <th>Actividad</th>
-                                <th>Alumno Responsable</th>
-                                <th>Declaración Docente</th>
-                                <th style="width: 170px;">Checklist Pañol</th>
-                                <th>Obs. Pañolero</th>
+                                <th style="width: 25%;">Actividad / Ítem</th>
+                                <th style="width: 15%;">Alumno Encargado</th>
+                                <th style="width: 20%;">Evaluación Docente</th>
+                                <th style="width: 20%;">Evaluación Pañol</th>
+                                <th style="width: 20%;">Obs. Pañolero</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {% for act in actividades %}
+                            {% for item in actividades %}
                             <tr>
-                                <td><strong>{{ act.actividad }}</strong></td>
-                                <td>{{ act.alumno_encargado or 'N/A' }}</td>
+                                <td class="fw-medium">{{ item.actividad }}</td>
                                 <td>
-                                    <span class="badge {{ 'bg-success' if act.estado == 'CONFORME' else 'bg-danger' }}">
-                                        {{ act.estado }}
+                                    <span class="badge bg-light text-dark border">
+                                        {{ item.alumno_encargado or 'Sin Asignar' }}
                                     </span>
-                                    {% if act.observaciones %}<br><small class="text-muted">{{ act.observaciones }}</small>{% endif %}
                                 </td>
                                 <td>
-                                    <select name="estado_panol_{{ loop.index0 }}" class="form-select form-select-sm">
-                                        <option value="CONFORME" selected>✓ Conforme</option>
-                                        <option value="NO_CONFORME">✗ No Conforme</option>
+                                    {% if item.estado == 'CONFORME' %}
+                                        <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1 d-block mb-1">
+                                            <i class="bi bi-check-circle me-1"></i>CONFORME
+                                        </span>
+                                    {% else %}
+                                        <span class="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1 d-block mb-1">
+                                            <i class="bi bi-x-circle me-1"></i>{{ item.estado }}
+                                        </span>
+                                    {% endif %}
+                                    {% if item.observaciones %}
+                                        <small class="text-muted d-block fst-italic">"{{ item.observaciones }}"</small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <select name="estado_panol_{{ loop.index0 }}" class="form-select form-select-sm fw-bold">
+                                        <option value="CONFORME" selected>CONFORME</option>
+                                        <option value="NO_CONFORME">NO CONFORME</option>
+                                        <option value="OBSERVADO">OBSERVADO</option>
                                     </select>
                                 </td>
                                 <td>
-                                    <input type="text" name="obs_panol_{{ loop.index0 }}" class="form-control form-control-sm" placeholder="Comentario de recepción...">
+                                    <input type="text" name="obs_panol_{{ loop.index0 }}" 
+                                           class="form-select-sm form-control" 
+                                           placeholder="Observación opcional...">
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="5" class="text-center py-4 text-muted">
+                                    No hay actividades registradas en este checklist.
                                 </td>
                             </tr>
                             {% endfor %}
                         </tbody>
                     </table>
                 </div>
+            </div>
 
-                <div class="d-flex justify-content-end gap-2 mt-4">
-                    <a href="/admin" class="btn btn-outline-secondary">Cancelar</a>
-                    <button type="submit" class="btn btn-success fw-bold">
-                        <i class="bi bi-check-circle me-1"></i> Aprobar y Finalizar Recepción
-                    </button>
+            <!-- Datos del Pañolero y Cierre -->
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-body p-4">
+                    <h6 class="fw-bold mb-3 text-dark">
+                        <i class="bi bi-person-badge me-2 text-primary"></i>Datos del Pañolero Receptor
+                    </h6>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-medium small">Nombre del Pañolero / Encargado</label>
+                            <input type="text" name="nombre_panolero" class="form-control" required placeholder="Ej: Juan Pérez">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-medium small">Observación General de Recepción</label>
+                            <input type="text" name="observacion_panolero" class="form-control" placeholder="Ej: Taller recibido limpio y ordenado en su totalidad.">
+                        </div>
+                    </div>
                 </div>
-            </form>
-        </div>
+            </div>
+
+            <!-- Botones de Acción -->
+            <div class="d-flex justify-content-end gap-2">
+                <a href="/admin" class="btn btn-outline-secondary px-4">Cancelar</a>
+                <button type="submit" class="btn btn-success px-4 fw-bold">
+                    <i class="bi bi-check2-all me-1"></i> Aprobar y Finalizar Recepción
+                </button>
+            </div>
+        </form>
     </div>
-</div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
