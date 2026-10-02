@@ -6,44 +6,72 @@
     <title>Panel de Administración - Aseo Gastronomía</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <style>
+        .kpi-card {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .kpi-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 .5rem 1rem rgba(0,0,0,.08)!important;
+        }
+        .table-middle td, .table-middle th {
+            vertical-align: middle;
+        }
+    </style>
 </head>
 <body class="bg-light">
     <!-- Navegación -->
-    <nav class="navbar navbar-dark bg-dark mb-4">
-        <div class="container-fluid">
-            <a class="navbar-brand fw-bold" href="/">
-                <i class="bi bi-shield-lock-fill me-2"></i>Panel de Administración - Gastronomía
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4 shadow-sm">
+        <div class="container">
+            <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="/admin">
+                <i class="bi bi-shield-lock-fill text-warning fs-4"></i>
+                <span>Panel de Administración</span>
             </a>
-            <a href="/" class="btn btn-outline-light btn-sm">
+            <a href="/" class="btn btn-outline-light btn-sm ms-auto">
                 <i class="bi bi-house-door me-1"></i> Volver al Inicio
             </a>
         </div>
     </nav>
 
     <div class="container mb-5">
-        <!-- Métricas / KPIs -->
+        <!-- Alerta de Notificación (vía Query Params) -->
+        <div id="alertNotification" class="alert alert-success alert-dismissible fade show d-none mb-4 shadow-sm" role="alert">
+            <i class="bi bi-check-circle-fill me-2" id="alertIcon"></i>
+            <span id="alertMessage">Operación realizada con éxito.</span>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+
+        <!-- Métricas / KPIs (4 Tarjetas) -->
         <div class="row g-3 mb-4">
-            <div class="col-md-4">
-                <div class="card border-0 shadow-sm text-center py-3 bg-white">
-                    <div class="card-body">
-                        <h6 class="text-muted fw-normal">Total Registros</h6>
+            <div class="col-6 col-md-3">
+                <div class="card border-0 shadow-sm text-center py-2 bg-white kpi-card border-start border-primary border-4">
+                    <div class="card-body py-2">
+                        <div class="text-uppercase text-muted fw-bold small">Total Registros</div>
                         <h2 class="mb-0 text-primary fw-bold">{{ kpi.total }}</h2>
                     </div>
                 </div>
             </div>
-            <div class="col-md-4">
-                <div class="card border-0 shadow-sm text-center py-3 bg-white">
-                    <div class="card-body">
-                        <h6 class="text-muted fw-normal">Finalizados</h6>
+            <div class="col-6 col-md-3">
+                <div class="card border-0 shadow-sm text-center py-2 bg-white kpi-card border-start border-success border-4">
+                    <div class="card-body py-2">
+                        <div class="text-uppercase text-muted fw-bold small">Finalizados</div>
                         <h2 class="mb-0 text-success fw-bold">{{ kpi.finalizados }}</h2>
                     </div>
                 </div>
             </div>
-            <div class="col-md-4">
-                <div class="card border-0 shadow-sm text-center py-3 bg-white">
-                    <div class="card-body">
-                        <h6 class="text-muted fw-normal">Borradores</h6>
-                        <h2 class="mb-0 text-warning fw-bold">{{ kpi.borradores }}</h2>
+            <div class="col-6 col-md-3">
+                <div class="card border-0 shadow-sm text-center py-2 bg-white kpi-card border-start border-warning border-4">
+                    <div class="card-body py-2">
+                        <div class="text-uppercase text-muted fw-bold small">Pendientes Pañol</div>
+                        <h2 class="mb-0 text-warning fw-bold">{{ kpi.pendientes or 0 }}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card border-0 shadow-sm text-center py-2 bg-white kpi-card border-start border-secondary border-4">
+                    <div class="card-body py-2">
+                        <div class="text-uppercase text-muted fw-bold small">Borradores</div>
+                        <h2 class="mb-0 text-secondary fw-bold">{{ kpi.borradores }}</h2>
                     </div>
                 </div>
             </div>
@@ -51,10 +79,10 @@
 
         <!-- Filtros de Búsqueda -->
         <div class="card border-0 shadow-sm mb-4">
-            <div class="card-body">
+            <div class="card-body p-4">
                 <form method="GET" action="/admin" class="row g-3 align-items-end">
                     <div class="col-md-3">
-                        <label class="form-label fw-bold small">Docente</label>
+                        <label class="form-label fw-bold small text-secondary">Docente</label>
                         <select name="rut_docente" class="form-select">
                             <option value="">Todos los docentes</option>
                             {% for d in docentes %}
@@ -65,7 +93,7 @@
                         </select>
                     </div>
                     <div class="col-md-3">
-                        <label class="form-label fw-bold small">Taller</label>
+                        <label class="form-label fw-bold small text-secondary">Taller</label>
                         <select name="taller_id" class="form-select">
                             <option value="">Todos los talleres</option>
                             {% for p in plantillas %}
@@ -76,10 +104,11 @@
                         </select>
                     </div>
                     <div class="col-md-3">
-                        <label class="form-label fw-bold small">Estado</label>
+                        <label class="form-label fw-bold small text-secondary">Estado</label>
                         <select name="estado" class="form-select">
                             <option value="">Todos los estados</option>
                             <option value="FINALIZADO" {% if filtro_estado == 'FINALIZADO' %}selected{% endif %}>FINALIZADO</option>
+                            <option value="PENDIENTE_REVISION" {% if filtro_estado == 'PENDIENTE_REVISION' %}selected{% endif %}>PENDIENTE DE REVISIÓN</option>
                             <option value="BORRADOR" {% if filtro_estado == 'BORRADOR' %}selected{% endif %}>BORRADOR</option>
                         </select>
                     </div>
@@ -87,7 +116,9 @@
                         <button type="submit" class="btn btn-primary w-100">
                             <i class="bi bi-filter me-1"></i> Filtrar
                         </button>
-                        <a href="/admin" class="btn btn-outline-secondary">Limpiar</a>
+                        <a href="/admin" class="btn btn-outline-secondary" title="Limpiar Filtros">
+                            <i class="bi bi-arrow-counterclockwise"></i>
+                        </a>
                     </div>
                 </form>
             </div>
@@ -96,19 +127,21 @@
         <!-- Tabla de Resultados y Exportación -->
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
-                <h5 class="m-0 fw-bold">Listado de Checklists</h5>
+                <h5 class="m-0 fw-bold text-dark">
+                    <i class="bi bi-journal-text me-2 text-primary"></i>Listado de Checklists
+                </h5>
                 <a href="/admin/export/excel?rut_docente={{ filtro_docente or '' }}&taller_id={{ filtro_taller or '' }}&estado={{ filtro_estado or '' }}" 
-                   class="btn btn-success btn-sm">
+                   class="btn btn-success btn-sm px-3 fw-medium">
                     <i class="bi bi-file-earmark-excel me-1"></i> Exportar a Excel
                 </a>
             </div>
             <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
+                <table class="table table-hover table-middle mb-0">
                     <thead class="table-light">
-                        <tr>
+                        <tr class="small text-uppercase text-secondary">
                             <th>ID</th>
                             <th>Taller</th>
-                            <th>RUT Docente</th>
+                            <th>Docente</th>
                             <th>Sección</th>
                             <th>Fecha</th>
                             <th>Estado</th>
@@ -118,34 +151,60 @@
                     <tbody>
                         {% for c in checklists %}
                         <tr>
-                            <td><strong>#{{ c.id }}</strong></td>
-                            <td>{{ c.taller }}</td>
+                            <td><span class="badge bg-light text-dark border">#{{ c.id }}</span></td>
+                            <td class="fw-medium">{{ c.taller }}</td>
                             <td>{{ c.rut_docente or 'N/A' }}</td>
                             <td>{{ c.codigo_seccion or 'N/A' }}</td>
-                            <td>{{ c.fecha or 'N/A' }}</td>
+                            <td class="small">{{ c.fecha or 'N/A' }}</td>
                             <td>
                                 {% if c.estado == 'FINALIZADO' %}
-                                    <span class="badge bg-success text-white">FINALIZADO</span>
+                                    <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1">
+                                        <i class="bi bi-check-circle-fill me-1"></i>FINALIZADO
+                                    </span>
+                                {% elif c.estado == 'PENDIENTE_REVISION' %}
+                                    <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle px-2 py-1">
+                                        <i class="bi bi-clock-history me-1"></i>PENDIENTE PAÑOL
+                                    </span>
                                 {% else %}
-                                    <span class="badge bg-warning text-dark">BORRADOR</span>
+                                    <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle px-2 py-1">
+                                        <i class="bi bi-pencil me-1"></i>BORRADOR
+                                    </span>
                                 {% endif %}
                             </td>
                             <td class="text-end">
                                 <div class="btn-group btn-group-sm">
+                                    <!-- Botón Exportar PDF -->
                                     <a href="/admin/export/pdf/{{ c.id }}" class="btn btn-outline-danger" title="Descargar PDF">
-                                        <i class="bi bi-file-earmark-pdf me-1"></i> PDF
+                                        <i class="bi bi-file-earmark-pdf"></i> PDF
                                     </a>
+
+                                    <!-- Botón Revisión Pañol (Si está pendiente) -->
+                                    {% if c.estado == 'PENDIENTE_REVISION' %}
+                                    <a href="/checklist/revisar-panol/{{ c.id }}" class="btn btn-warning text-dark fw-bold" title="Revisar como Pañolero">
+                                        <i class="bi bi-clipboard-check me-1"></i> Revisar
+                                    </a>
+                                    {% endif %}
+
+                                    <!-- Botón Editar Borrador (Si es borrador) -->
                                     {% if c.estado == 'BORRADOR' %}
                                     <a href="/checklist/editar/{{ c.id }}" class="btn btn-outline-primary" title="Editar Borrador">
                                         <i class="bi bi-pencil"></i>
                                     </a>
                                     {% endif %}
+
+                                    <!-- Formulario Eliminar Registro -->
+                                    <form action="/admin/eliminar/{{ c.id }}" method="POST" class="d-inline" onsubmit="return confirm('¿Estás seguro de que deseas eliminar permanentemente el checklist #{{ c.id }}?');">
+                                        <button type="submit" class="btn btn-outline-secondary text-danger border-start-0" title="Eliminar Checklist">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
                                 </div>
                             </td>
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="7" class="text-center py-4 text-muted">
+                            <td colspan="7" class="text-center py-5 text-muted">
+                                <i class="bi bi-search fs-3 d-block mb-2 text-secondary"></i>
                                 No se encontraron registros con los filtros seleccionados.
                             </td>
                         </tr>
@@ -155,5 +214,30 @@
             </div>
         </div>
     </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Muestra avisos dinámicos en la UI leyendo los parámetros URL (?msg=...)
+        document.addEventListener("DOMContentLoaded", () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const msg = urlParams.get('msg');
+            
+            if (msg) {
+                const alertEl = document.getElementById('alertNotification');
+                const alertMsg = document.getElementById('alertMessage');
+                
+                const mensajes = {
+                    'checklist_aprobado': 'Checklist revisado y aprobado exitosamente.',
+                    'checklist_eliminado': 'Checklist eliminado correctamente.',
+                    'enviado_a_panol': 'Checklist enviado a Pañol para su revisión.'
+                };
+
+                if (mensajes[msg]) {
+                    alertMsg.textContent = mensajes[msg];
+                    alertEl.classList.remove('d-none');
+                }
+            }
+        });
+    </script>
 </body>
 </html>

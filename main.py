@@ -77,7 +77,7 @@ app = FastAPI(
         "Sistema para registro de checklist de aseo, control de talleres, "
         "gestión de borrador/pendientes de revisión, aprobación por Pañol y exportación de reportes."
     ),
-    version="1.7.0",
+    version="1.8.0",
     lifespan=lifespan,
 )
 
@@ -364,12 +364,12 @@ async def guardar_checklist(request: Request, db: Session = Depends(get_db)):
 
 
 # ==========================================
-# RUTAS DE REVISIÓN PAÑOLERO
+# RUTAS DE REVISIÓN PAÑOLERO (DOBLE CHECKLIST)
 # ==========================================
 
 @app.get("/checklist/revisar-panol/{checklist_id}", response_class=HTMLResponse, tags=["Pañol"])
 async def vista_revision_panol(checklist_id: int, request: Request, db: Session = Depends(get_db)):
-    """Vista para que el Pañolero revise y recepcione el taller."""
+    """Vista para que el Pañolero revise y recepcione el taller con Doble Checklist."""
     checklist = db.query(models.Checklist).filter(models.Checklist.id == checklist_id).first()
     if not checklist:
         raise HTTPException(status_code=404, detail="Checklist no encontrado")
@@ -384,8 +384,12 @@ async def vista_revision_panol(checklist_id: int, request: Request, db: Session 
 
 
 @app.post("/checklist/aprobar-panol/{checklist_id}", tags=["Pañol"])
-async def aprobar_revision_panol(checklist_id: int, request: Request, db: Session = Depends(get_db)):
-    """Registra la conformidad del Pañolero y finaliza el ciclo."""
+async def aprobar_revision_panol(
+    checklist_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Registra la revisión ítem por ítem del Pañolero (Doble Checklist) y finaliza el registro."""
     form_data = await request.form()
     nombre_panolero = form_data.get("nombre_panolero")
     observacion_panolero = form_data.get("observacion_panolero")
@@ -394,12 +398,26 @@ async def aprobar_revision_panol(checklist_id: int, request: Request, db: Sessio
     if not checklist:
         raise HTTPException(status_code=404, detail="Checklist no encontrado")
 
+    actividades_docente = safe_json_loads(getattr(checklist, "actividades_json", None))
+    actividades_actualizadas = []
+
+    # Procesa la verificación del Pañolero conservando lo declarado por el Docente
+    for idx, item in enumerate(actividades_docente):
+        estado_panol = form_data.get(f"estado_panol_{idx}", "CONFORME")
+        obs_panol = form_data.get(f"obs_panol_{idx}", "")
+
+        item["estado_panol"] = estado_panol
+        item["obs_panol"] = obs_panol
+        actividades_actualizadas.append(item)
+
     if hasattr(checklist, "nombre_panolero"):
         checklist.nombre_panolero = nombre_panolero
     if hasattr(checklist, "observacion_panolero"):
         checklist.observacion_panolero = observacion_panolero
     if hasattr(checklist, "fecha_revision_panolero"):
         checklist.fecha_revision_panolero = datetime.now()
+    if hasattr(checklist, "actividades_json"):
+        checklist.actividades_json = json.dumps(actividades_actualizadas, ensure_ascii=False)
 
     checklist.estado = "FINALIZADO"
 
@@ -462,6 +480,24 @@ async def admin_panel(
             },
         },
     )
+
+
+@app.post("/admin/eliminar/{checklist_id}", tags=["Panel de Administración"])
+async def eliminar_checklist(checklist_id: int, db: Session = Depends(get_db)):
+    """Elimina permanentemente un checklist de la base de datos."""
+    checklist = db.query(models.Checklist).filter(models.Checklist.id == checklist_id).first()
+    if not checklist:
+        raise HTTPException(status_code=404, detail="Checklist no encontrado")
+
+    try:
+        db.delete(checklist)
+        db.commit()
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error(f"Error al eliminar checklist #{checklist_id}: {e}")
+        raise HTTPException(status_code=500, detail="Error de base de datos al eliminar el checklist.")
+
+    return RedirectResponse(url="/admin?msg=checklist_eliminado", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.get("/admin/export/excel", tags=["Panel de Administración"])
@@ -530,7 +566,7 @@ async def export_excel(
 
 @app.get("/admin/export/pdf/{checklist_id}", tags=["Panel de Administración"])
 async def export_pdf(checklist_id: int, db: Session = Depends(get_db)):
-    """Genera un informe PDF estilizado."""
+    """Genera un informe PDF estilizado contemplando el doble checklist."""
     c = db.query(models.Checklist).filter(models.Checklist.id == checklist_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Checklist no encontrado")
@@ -571,7 +607,7 @@ async def export_pdf(checklist_id: int, db: Session = Depends(get_db)):
             Paragraph("<b>Fecha Revisión Pañol:</b>", styles["Normal"]), Paragraph(f_rev.strftime("%Y-%m-%d %H:%M") if f_rev else "Pendiente", styles["Normal"])
         ],
         [
-            Paragraph("<b>Obs. Pañol:</b>", styles["Normal"]), Paragraph(str(getattr(c, "observacion_panolero", "") or "Sin observaciones"), styles["Normal"]),
+            Paragraph("<b>Obs. General Pañol:</b>", styles["Normal"]), Paragraph(str(getattr(c, "observacion_panolero", "") or "Sin observaciones"), styles["Normal"]),
             Paragraph("<b>-</b>", styles["Normal"]), Paragraph("-", styles["Normal"])
         ]
     ]
@@ -584,14 +620,15 @@ async def export_pdf(checklist_id: int, db: Session = Depends(get_db)):
     story.append(t_info)
     story.append(Spacer(1, 15))
 
-    story.append(Paragraph("<b>Detalle de Actividades Evaluadas:</b>", styles["Heading2"]))
+    story.append(Paragraph("<b>Detalle de Actividades Evaluadas (Doble Checklist):</b>", styles["Heading2"]))
     story.append(Spacer(1, 8))
 
     headers_act = [
         Paragraph("<b>Actividad</b>", styles["Normal"]),
         Paragraph("<b>Alumno Responsable</b>", styles["Normal"]),
-        Paragraph("<b>Estado</b>", styles["Normal"]),
-        Paragraph("<b>Observaciones Docente</b>", styles["Normal"])
+        Paragraph("<b>Estado Docente</b>", styles["Normal"]),
+        Paragraph("<b>Estado Pañol</b>", styles["Normal"]),
+        Paragraph("<b>Obs. Pañol</b>", styles["Normal"])
     ]
     act_rows = [headers_act]
 
@@ -603,17 +640,19 @@ async def export_pdf(checklist_id: int, db: Session = Depends(get_db)):
                 Paragraph(str(item.get("actividad", "N/A")), styles["Normal"]),
                 Paragraph(str(item.get("alumno_encargado", "N/A") or "N/A"), styles["Normal"]),
                 Paragraph(str(item.get("estado", "N/A")), styles["Normal"]),
-                Paragraph(str(item.get("observaciones", "-") or "-"), styles["Normal"])
+                Paragraph(str(item.get("estado_panol", "Pendiente")), styles["Normal"]),
+                Paragraph(str(item.get("obs_panol", "-") or "-"), styles["Normal"])
             ])
     else:
         act_rows.append([
             Paragraph("Sin detalle de actividades registradas", styles["Normal"]),
             Paragraph("-", styles["Normal"]),
             Paragraph("-", styles["Normal"]),
+            Paragraph("-", styles["Normal"]),
             Paragraph("-", styles["Normal"])
         ])
 
-    t_act = Table(act_rows, colWidths=[160, 120, 90, 150])
+    t_act = Table(act_rows, colWidths=[140, 110, 90, 90, 90])
     t_act.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0d6efd")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
