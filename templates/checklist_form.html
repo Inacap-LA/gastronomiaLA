@@ -19,6 +19,16 @@
     </nav>
 
     <div class="container mb-5">
+        {% if checklist and checklist.estado == 'BORRADOR' %}
+        <div class="alert alert-warning alert-dismissible fade show d-flex align-items-center" role="alert">
+            <i class="bi bi-exclamation-triangle-fill flex-shrink-0 me-2 fs-5"></i>
+            <div>
+                <strong>Modo Borrador:</strong> Estás editando una pauta guardada previamente. Puedes hacer cambios y volver a guardar o finalizar el proceso.
+            </div>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endif %}
+
         <div class="d-flex justify-content-between align-items-center mb-3">
             <div>
                 <h2 class="h3 mb-0 text-primary fw-bold">
@@ -32,6 +42,8 @@
         </div>
 
         <form action="/guardar-checklist" method="POST" id="checklistForm">
+            <!-- ID oculto para actualización de borradores -->
+            <input type="hidden" name="checklist_id" value="{{ checklist.id if checklist else '' }}">
             <input type="hidden" name="taller_id" value="{{ taller.id }}">
             
             <!-- Información General -->
@@ -71,7 +83,7 @@
                         <label for="encargado_taller" class="form-label fw-semibold">
                             Encargado de Taller <span class="text-danger">*</span>
                         </label>
-                        <input type="text" id="encargado_taller" name="encargado_taller" class="form-control" placeholder="Nombre del encargado" required>
+                        <input type="text" id="encargado_taller" name="encargado_taller" class="form-control" placeholder="Nombre del encargado" value="{{ checklist.encargado_taller if checklist and checklist.encargado_taller else '' }}" required>
                     </div>
                 </div>
             </div>
@@ -101,18 +113,18 @@
                                     <span class="fw-medium text-dark">{{ act }}</span>
                                 </td>
                                 <td>
-                                    <select name="alumno_{{ loop.index0 }}" class="form-select form-select-sm select-alumno" disabled aria-label="Alumno Encargado">
+                                    <select name="alumno_{{ loop.index0 }}" id="alumno_{{ loop.index0 }}" class="form-select form-select-sm select-alumno" disabled aria-label="Alumno Encargado">
                                         <option value="">-- Seleccione sección primero --</option>
                                     </select>
                                 </td>
                                 <td>
-                                    <select name="estado_{{ loop.index0 }}" class="form-select form-select-sm fw-semibold">
+                                    <select name="estado_{{ loop.index0 }}" id="estado_{{ loop.index0 }}" class="form-select form-select-sm fw-semibold">
                                         <option value="CONFORME" class="text-success fw-bold">✓ Conforme</option>
                                         <option value="NO CONFORME" class="text-danger fw-bold">✕ No Conforme</option>
                                     </select>
                                 </td>
                                 <td class="pe-3">
-                                    <input type="text" name="obs_{{ loop.index0 }}" class="form-control form-control-sm" placeholder="Detalle u observación...">
+                                    <input type="text" name="obs_{{ loop.index0 }}" id="obs_{{ loop.index0 }}" class="form-control form-control-sm" placeholder="Detalle u observación...">
                                 </td>
                             </tr>
                             {% endfor %}
@@ -121,31 +133,33 @@
                 </div>
             </div>
 
+            <!-- Botonera Doble Acción -->
             <div class="d-flex justify-content-end gap-2">
                 <a href="/" class="btn btn-secondary px-4">
                     <i class="bi bi-x-circle me-1"></i>Cancelar
                 </a>
-                <button type="submit" id="btnSubmit" class="btn btn-success px-4 fw-semibold">
-                    <i class="bi bi-check-circle me-1"></i><span id="btnText">Guardar Checklist</span>
+                
+                <!-- Guardar Borrador -->
+                <button type="submit" name="accion" value="borrador" class="btn btn-warning px-4 fw-semibold text-dark">
+                    <i class="bi bi-save me-1"></i>Guardar Borrador
+                </button>
+                
+                <!-- Finalizar Definitivo -->
+                <button type="submit" name="accion" value="finalizar" class="btn btn-success px-4 fw-semibold">
+                    <i class="bi bi-check-circle me-1"></i>Finalizar y Enviar Checklist
                 </button>
             </div>
         </form>
     </div>
 
+    <!-- Script de Precarga y Manejo de Formulario -->
     <script>
+    const checklistData = {{ checklist_json | safe if checklist_json else 'null' }};
+
     document.addEventListener("DOMContentLoaded", async () => {
         const selectDocente = document.getElementById("select-docente");
         const selectSeccion = document.getElementById("select-seccion");
         const selectsAlumno = document.querySelectorAll(".select-alumno");
-        const form = document.getElementById("checklistForm");
-        const btnSubmit = document.getElementById("btnSubmit");
-        const btnText = document.getElementById("btnText");
-
-        // Prevención de doble submit
-        form.addEventListener("submit", () => {
-            btnSubmit.disabled = true;
-            btnText.textContent = "Guardando...";
-        });
 
         // 1. Cargar docentes
         try {
@@ -161,16 +175,39 @@
                 opt.textContent = `${d.nombre} (${d.rut})`;
                 selectDocente.appendChild(opt);
             });
+
+            // Si es un borrador cargado, seleccionar el docente guardado
+            if (checklistData && checklistData.rut_docente) {
+                for (let opt of selectDocente.options) {
+                    if (opt.dataset.rut === checklistData.rut_docente || opt.value.includes(checklistData.rut_docente)) {
+                        selectDocente.value = opt.value;
+                        break;
+                    }
+                }
+                if (selectDocente.value) {
+                    await cargarSecciones(checklistData.rut_docente);
+                }
+            }
         } catch (err) {
             selectDocente.innerHTML = '<option value="">Error al cargar docentes</option>';
             console.error(err);
         }
 
-        // 2. Al cambiar docente -> Cargar secciones asociadas
+        // Evento cambio de Docente
         selectDocente.addEventListener("change", async () => {
             const selectedOpt = selectDocente.options[selectDocente.selectedIndex];
             const rutDocente = selectedOpt ? selectedOpt.dataset.rut : null;
+            await cargarSecciones(rutDocente);
+        });
 
+        // Evento cambio de Sección
+        selectSeccion.addEventListener("change", async () => {
+            const selectedOpt = selectSeccion.options[selectSeccion.selectedIndex];
+            const seccionCodigo = selectedOpt ? selectedOpt.dataset.codigoSeccion : null;
+            await cargarAlumnos(seccionCodigo);
+        });
+
+        async function cargarSecciones(rutDocente) {
             selectSeccion.innerHTML = '<option value="">-- Seleccione una sección --</option>';
             resetSelectsAlumno();
 
@@ -195,17 +232,26 @@
                     selectSeccion.appendChild(opt);
                 });
                 selectSeccion.disabled = false;
+
+                // Si es borrador, seleccionar la sección guardada
+                if (checklistData && checklistData.codigo_seccion) {
+                    for (let opt of selectSeccion.options) {
+                        if (opt.dataset.codigoSeccion === checklistData.codigo_seccion || opt.value.startsWith(checklistData.codigo_seccion)) {
+                            selectSeccion.value = opt.value;
+                            break;
+                        }
+                    }
+                    if (selectSeccion.value) {
+                        await cargarAlumnos(checklistData.codigo_seccion);
+                    }
+                }
             } catch (err) {
                 selectSeccion.innerHTML = '<option value="">Error al cargar secciones</option>';
                 console.error(err);
             }
-        });
+        }
 
-        // 3. Al cambiar sección -> Cargar alumnos asignados
-        selectSeccion.addEventListener("change", async () => {
-            const selectedOpt = selectSeccion.options[selectSeccion.selectedIndex];
-            const seccionCodigo = selectedOpt ? selectedOpt.dataset.codigoSeccion : null;
-
+        async function cargarAlumnos(seccionCodigo) {
             if (!seccionCodigo) {
                 resetSelectsAlumno();
                 return;
@@ -220,7 +266,7 @@
                 const resAlumnos = await fetch(`/api/secciones/${encodeURIComponent(seccionCodigo)}/alumnos`);
                 const alumnos = await resAlumnos.json();
 
-                selectsAlumno.forEach(select => {
+                selectsAlumno.forEach((select, idx) => {
                     select.innerHTML = '<option value="">-- Seleccione un alumno --</option>';
                     if (alumnos.length === 0) {
                         select.innerHTML = '<option value="">Sin alumnos inscritos</option>';
@@ -233,6 +279,22 @@
                         });
                         select.disabled = false;
                     }
+
+                    // Si es borrador, precargar el alumno, estado y observación previamente seleccionados
+                    if (checklistData && checklistData.actividades && checklistData.actividades[idx]) {
+                        const actSaved = checklistData.actividades[idx];
+                        if (actSaved.alumno_encargado) {
+                            select.value = actSaved.alumno_encargado;
+                        }
+                        const elemEstado = document.getElementById(`estado_${idx}`);
+                        if (elemEstado && actSaved.estado) {
+                            elemEstado.value = actSaved.estado;
+                        }
+                        const elemObs = document.getElementById(`obs_${idx}`);
+                        if (elemObs && actSaved.observaciones !== undefined) {
+                            elemObs.value = actSaved.observaciones;
+                        }
+                    }
                 });
             } catch (err) {
                 selectsAlumno.forEach(s => {
@@ -240,7 +302,7 @@
                 });
                 console.error(err);
             }
-        });
+        }
 
         function resetSelectsAlumno() {
             selectsAlumno.forEach(s => {
