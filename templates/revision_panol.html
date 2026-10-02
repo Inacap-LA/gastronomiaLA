@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Revisión de Pañol - Checklist #{{ checklist.id }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+    <div class="container py-4">
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-warning text-dark fw-bold">
+                Revisión y Recepción de Taller por Pañolero
+            </div>
+            <div class="card-body">
+                <h5>Taller: {{ checklist.taller }}</h5>
+                <p class="mb-1"><strong>Docente:</strong> {{ checklist.rut_docente }} | <strong>Sección:</strong> {{ checklist.codigo_seccion }}</p>
+                <p class="mb-0"><strong>Encargado Taller:</strong> {{ checklist.encargado_taller }}</p>
+            </div>
+        </div>
+
+        <!-- Tabla de Actividades completadas por el Docente -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-body">
+                <h6 class="fw-bold mb-3">Evaluación del Docente</h6>
+                <table class="table table-bordered align-middle">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Actividad</th>
+                            <th>Alumno Responsable</th>
+                            <th>Estado</th>
+                            <th>Observaciones Docente</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for act in actividades %}
+                        <tr>
+                            <td>{{ act.actividad }}</td>
+                            <td>{{ act.alumno_encargado or 'N/A' }}</td>
+                            <td><span class="badge bg-info text-dark">{{ act.estado }}</span></td>
+                            <td>{{ act.observaciones or '-' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Formulario de Conformidad del Pañolero -->
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <form method="POST" action="/checklist/aprobar-panol/{{ checklist.id }}">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Pañolero a Cargo (Revisor) *</label>
+                        <input type="text" name="nombre_panolero" class="form-control" required placeholder="Nombre del pañolero que recibe el taller">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Observaciones de Recepción Pañol</label>
+                        <textarea name="observacion_panolero" class="form-control" rows="3" placeholder="Detalle observaciones adicionales en la recepción de equipos o aseo..."></textarea>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <a href="/admin" class="btn btn-outline-secondary">Cancelar</a>
+                        <button type="submit" class="btn btn-success fw-bold">
+                            ✓ Confirmar Recepción y Finalizar
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -76,11 +76,16 @@ class Checklist(Base):
     codigo_seccion = Column(String, index=True, nullable=False)
     fecha = Column(Date, nullable=True)
     encargado_taller = Column(String, nullable=True)
-    
+
     # Detalle en JSON de los alumnos asignados, estados y observaciones
     actividades_json = Column(Text, nullable=True)
 
-    # Estado del flujo: 'BORRADOR' o 'FINALIZADO'
+    # Campos de validación y recepción por Pañolero
+    nombre_panolero = Column(String, nullable=True)
+    observacion_panolero = Column(Text, nullable=True)
+    fecha_revision_panolero = Column(DateTime, nullable=True)
+
+    # Estado del flujo: 'BORRADOR', 'PENDIENTE_REVISION' o 'FINALIZADO'
     estado = Column(String, default="BORRADOR", index=True, nullable=False)
 
     # Registro de fechas
