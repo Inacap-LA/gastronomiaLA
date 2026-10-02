@@ -1,17 +1,23 @@
+import io
 import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import List, Optional
 
 from database import engine, get_db
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import models
+from openpyxl import Workbook
 from pydantic import BaseModel, ConfigDict
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -24,23 +30,23 @@ os.makedirs("static", exist_ok=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-  """Manejador del ciclo de vida de la aplicación."""
-  if engine:
-    try:
-      models.Base.metadata.create_all(bind=engine)
-      logger.info("Tablas de la BD verificadas/creadas exitosamente.")
-    except Exception as e:
-      logger.error(f"Error al inicializar la base de datos en arranque: {e}")
-  yield
+    """Manejador del ciclo de vida de la aplicación."""
+    if engine:
+        try:
+            models.Base.metadata.create_all(bind=engine)
+            logger.info("Tablas de la BD verificadas/creadas exitosamente.")
+        except Exception as e:
+            logger.error(f"Error al inicializar la base de datos en arranque: {e}")
+    yield
 
 
 app = FastAPI(
     title="Gestión de Aseo Gastronomía",
     description=(
-        "Sistema para registro de checklist de aseo, control de talleres y"
-        " asignación de alumnos."
+        "Sistema para registro de checklist de aseo, control de talleres, "
+        "gestión de borrador/finalizados y panel de administración con reportes."
     ),
-    version="1.4.0",
+    version="1.5.0",
     lifespan=lifespan,
 )
 
@@ -52,282 +58,476 @@ templates = Jinja2Templates(directory="templates")
 # ESQUEMAS PYDANTIC (Pydantic V2)
 # ==========================================
 class DocenteOut(BaseModel):
-  rut: str
-  nombre: str
+    rut: str
+    nombre: str
 
-  model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SeccionOut(BaseModel):
-  cod_asignatura: Optional[str] = None
-  asignatura: str
-  seccion: str
+    cod_asignatura: Optional[str] = None
+    asignatura: str
+    seccion: str
 
-  model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AlumnoOut(BaseModel):
-  rut: str
-  nombre: str
+    rut: str
+    nombre: str
 
-  model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==========================================
-# RUTAS DE VISTAS WEB (HTML)
+# RUTAS DE VISTAS WEB (HTML PUBLICAS)
 # ==========================================
-
 
 @app.get("/", response_class=HTMLResponse, tags=["Vistas Web"])
 async def index(request: Request, db: Session = Depends(get_db)):
-  """Página principal: Muestra plantillas activas y listado de checklists (borradores y finalizados)."""
-  plantillas_db = db.query(models.Plantilla).all()
-  plantillas = [
-      {
-          "id": p.id,
-          "nombre": p.nombre,
-          "actividades": [a.descripcion for a in p.actividades],
-      }
-      for p in plantillas_db
-  ]
+    """Página principal: Muestra plantillas activas e historial de revisiones."""
+    plantillas_db = db.query(models.Plantilla).all()
+    plantillas = [
+        {
+            "id": p.id,
+            "nombre": p.nombre,
+            "actividades": [a.descripcion for a in p.actividades],
+        }
+        for p in plantillas_db
+    ]
 
-  checklists_db = (
-      db.query(models.Checklist)
-      .order_by(models.Checklist.fecha_actualizacion.desc())
-      .limit(15)
-      .all()
-  )
+    checklists_db = (
+        db.query(models.Checklist)
+        .order_by(models.Checklist.fecha_actualizacion.desc())
+        .limit(15)
+        .all()
+    )
 
-  revisiones = []
-  for c in checklists_db:
-    actividades = (
-        json.loads(c.actividades_json)
-        if hasattr(c, "actividades_json") and c.actividades_json
+    revisiones = []
+    for c in checklists_db:
+        actividades = (
+            json.loads(c.actividades_json)
+            if hasattr(c, "actividades_json") and c.actividades_json
+            else []
+        )
+        revisiones.append({
+            "id": c.id,
+            "taller_id": c.taller,
+            "docente": c.rut_docente or "N/A",
+            "clase": c.codigo_seccion or "N/A",
+            "fecha": c.fecha.strftime("%Y-%m-%d") if c.fecha else "N/A",
+            "encargado_taller": getattr(c, "encargado_taller", "N/A"),
+            "estado": c.estado,
+            "actividades": actividades,
+            "fecha_actualizacion": (
+                c.fecha_actualizacion.strftime("%Y-%m-%d %H:%M")
+                if c.fecha_actualizacion
+                else ""
+            ),
+        })
+
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={"plantillas": plantillas, "revisiones": revisiones},
+    )
+
+
+@app.get("/checklist/{taller_id}", response_class=HTMLResponse, tags=["Vistas Web"])
+async def nuevo_checklist(request: Request, taller_id: str, db: Session = Depends(get_db)):
+    """Vista de formulario para crear un nuevo checklist desde cero."""
+    plantilla = (
+        db.query(models.Plantilla)
+        .filter(models.Plantilla.id == taller_id)
+        .first()
+    )
+    if not plantilla:
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+
+    data = {
+        "id": plantilla.id,
+        "nombre": plantilla.nombre,
+        "actividades": [a.descripcion for a in plantilla.actividades],
+    }
+    fecha_actual = datetime.now().strftime("%Y-%m-%d")
+
+    return templates.TemplateResponse(
+        request=request,
+        name="checklist_form.html",
+        context={
+            "taller": data,
+            "checklist": None,
+            "checklist_json": None,
+            "fecha_actual": fecha_actual,
+        },
+    )
+
+
+@app.get("/checklist/editar/{checklist_id}", response_class=HTMLResponse, tags=["Vistas Web"])
+async def editar_checklist(request: Request, checklist_id: int, db: Session = Depends(get_db)):
+    """Vista para reabrir y continuar un borrador pendiente."""
+    checklist = (
+        db.query(models.Checklist)
+        .filter(models.Checklist.id == checklist_id)
+        .first()
+    )
+    if not checklist:
+        raise HTTPException(
+            status_code=404, detail="Checklist en borrador no encontrado"
+        )
+
+    plantilla = (
+        db.query(models.Plantilla)
+        .filter(models.Plantilla.id == checklist.taller)
+        .first()
+    )
+    taller_nombre = plantilla.nombre if plantilla else f"Taller {checklist.taller}"
+    actividades_base = (
+        [a.descripcion for a in plantilla.actividades] if plantilla else []
+    )
+
+    taller_data = {
+        "id": checklist.taller,
+        "nombre": taller_nombre,
+        "actividades": actividades_base,
+    }
+
+    actividades_guardadas = (
+        json.loads(checklist.actividades_json)
+        if hasattr(checklist, "actividades_json") and checklist.actividades_json
         else []
     )
-    revisiones.append({
-        "id": c.id,
-        "taller_id": c.taller,
-        "docente": c.rut_docente or "N/A",
-        "clase": c.codigo_seccion or "N/A",
-        "fecha": c.fecha.strftime("%Y-%m-%d") if c.fecha else "N/A",
-        "encargado_taller": getattr(c, "encargado_taller", "N/A"),
-        "estado": c.estado,
-        "actividades": actividades,
-        "fecha_actualizacion": (
-            c.fecha_actualizacion.strftime("%Y-%m-%d %H:%M")
-            if c.fecha_actualizacion
-            else ""
-        ),
-    })
 
-  return templates.TemplateResponse(
-      request=request,
-      name="index.html",
-      context={"plantillas": plantillas, "revisiones": revisiones},
-  )
+    checklist_dict = {
+        "id": checklist.id,
+        "taller_id": checklist.taller,
+        "rut_docente": checklist.rut_docente,
+        "codigo_seccion": checklist.codigo_seccion,
+        "fecha": checklist.fecha.strftime("%Y-%m-%d") if checklist.fecha else "",
+        "encargado_taller": getattr(checklist, "encargado_taller", ""),
+        "estado": checklist.estado,
+        "actividades": actividades_guardadas,
+    }
 
-
-@app.get(
-    "/checklist/{taller_id}", response_class=HTMLResponse, tags=["Vistas Web"]
-)
-async def nuevo_checklist(
-    request: Request, taller_id: str, db: Session = Depends(get_db)
-):
-  """Vista de formulario para crear un checklist desde cero."""
-  plantilla = (
-      db.query(models.Plantilla)
-      .filter(models.Plantilla.id == taller_id)
-      .first()
-  )
-  if not plantilla:
-    return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
-
-  data = {
-      "id": plantilla.id,
-      "nombre": plantilla.nombre,
-      "actividades": [a.descripcion for a in plantilla.actividades],
-  }
-  fecha_actual = datetime.now().strftime("%Y-%m-%d")
-
-  return templates.TemplateResponse(
-      request=request,
-      name="checklist_form.html",
-      context={
-          "taller": data,
-          "checklist": None,
-          "checklist_json": None,
-          "fecha_actual": fecha_actual,
-      },
-  )
-
-
-@app.get(
-    "/checklist/editar/{checklist_id}",
-    response_class=HTMLResponse,
-    tags=["Vistas Web"],
-)
-async def editar_checklist(
-    request: Request, checklist_id: int, db: Session = Depends(get_db)
-):
-  """Vista para reabrir y continuar un borrador pendiente."""
-  checklist = (
-      db.query(models.Checklist)
-      .filter(models.Checklist.id == checklist_id)
-      .first()
-  )
-  if not checklist:
-    raise HTTPException(
-        status_code=404, detail="Checklist en borrador no encontrado"
+    return templates.TemplateResponse(
+        request=request,
+        name="checklist_form.html",
+        context={
+            "taller": taller_data,
+            "checklist": checklist,
+            "checklist_json": json.dumps(checklist_dict, ensure_ascii=False),
+            "fecha_actual": (
+                checklist.fecha.strftime("%Y-%m-%d")
+                if checklist.fecha
+                else datetime.now().strftime("%Y-%m-%d")
+            ),
+        },
     )
-
-  plantilla = (
-      db.query(models.Plantilla)
-      .filter(models.Plantilla.id == checklist.taller)
-      .first()
-  )
-  taller_nombre = plantilla.nombre if plantilla else f"Taller {checklist.taller}"
-  actividades_base = (
-      [a.descripcion for a in plantilla.actividades] if plantilla else []
-  )
-
-  taller_data = {
-      "id": checklist.taller,
-      "nombre": taller_nombre,
-      "actividades": actividades_base,
-  }
-
-  actividades_guardadas = (
-      json.loads(checklist.actividades_json)
-      if hasattr(checklist, "actividades_json") and checklist.actividades_json
-      else []
-  )
-
-  checklist_dict = {
-      "id": checklist.id,
-      "taller_id": checklist.taller,
-      "rut_docente": checklist.rut_docente,
-      "codigo_seccion": checklist.codigo_seccion,
-      "fecha": checklist.fecha.strftime("%Y-%m-%d") if checklist.fecha else "",
-      "encargado_taller": getattr(checklist, "encargado_taller", ""),
-      "estado": checklist.estado,
-      "actividades": actividades_guardadas,
-  }
-
-  return templates.TemplateResponse(
-      request=request,
-      name="checklist_form.html",
-      context={
-          "taller": taller_data,
-          "checklist": checklist,
-          "checklist_json": json.dumps(checklist_dict, ensure_ascii=False),
-          "fecha_actual": (
-              checklist.fecha.strftime("%Y-%m-%d")
-              if checklist.fecha
-              else datetime.now().strftime("%Y-%m-%d")
-          ),
-      },
-  )
 
 
 @app.post("/guardar-checklist", tags=["Vistas Web"])
 async def guardar_checklist(request: Request, db: Session = Depends(get_db)):
-  """Procesa el guardado parcial (Borrador) o definitivo (Finalizar) del checklist."""
-  form_data = await request.form()
+    """Procesa el guardado parcial (Borrador) o definitivo (Finalizar) del checklist."""
+    form_data = await request.form()
 
-  checklist_id = form_data.get("checklist_id")
-  taller_id = form_data.get("taller_id")
-  docente = form_data.get("docente")
-  clase = form_data.get("clase")
-  fecha_str = form_data.get("fecha")
-  encargado_taller = form_data.get("encargado_taller")
-  accion = form_data.get("accion", "borrador")  # 'borrador' o 'finalizar'
+    checklist_id = form_data.get("checklist_id")
+    taller_id = form_data.get("taller_id")
+    docente = form_data.get("docente")
+    clase = form_data.get("clase")
+    fecha_str = form_data.get("fecha")
+    encargado_taller = form_data.get("encargado_taller")
+    accion = form_data.get("accion", "borrador")
 
-  plantilla = (
-      db.query(models.Plantilla)
-      .filter(models.Plantilla.id == taller_id)
-      .first()
-  )
-  if not plantilla:
-    return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
-
-  actividades_raw = [a.descripcion for a in plantilla.actividades]
-  actividades_evaluadas = []
-
-  for idx, act in enumerate(actividades_raw):
-    alumno = form_data.get(f"alumno_{idx}", "")
-    estado_eval = form_data.get(f"estado_{idx}", "CONFORME")
-    observacion = form_data.get(f"obs_{idx}", "")
-
-    actividades_evaluadas.append({
-        "actividad": act,
-        "alumno_encargado": alumno,
-        "estado": estado_eval,
-        "observaciones": observacion,
-    })
-
-  # Extraer RUT y Código de Sección limpios
-  rut_docente = (
-      docente.split("(")[-1].replace(")", "").strip()
-      if docente and "(" in docente
-      else docente
-  )
-  codigo_seccion = (
-      clase.split(" - ")[0].strip() if clase and " - " in clase else clase
-  )
-  fecha_obj = (
-      datetime.strptime(fecha_str, "%Y-%m-%d").date() if fecha_str else None
-  )
-  nuevo_estado = "FINALIZADO" if accion == "finalizar" else "BORRADOR"
-
-  # Actualizar borrador existente o crear un nuevo registro
-  if checklist_id and checklist_id.strip():
-    checklist = (
-        db.query(models.Checklist)
-        .filter(models.Checklist.id == int(checklist_id))
+    plantilla = (
+        db.query(models.Plantilla)
+        .filter(models.Plantilla.id == taller_id)
         .first()
     )
-    if not checklist:
-      raise HTTPException(
-          status_code=status.HTTP_404_NOT_FOUND,
-          detail="Checklist no encontrado",
-      )
-  else:
-    checklist = models.Checklist()
-    db.add(checklist)
+    if not plantilla:
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
-  checklist.taller = taller_id
-  checklist.rut_docente = rut_docente or docente
-  checklist.codigo_seccion = codigo_seccion or clase
-  checklist.fecha = fecha_obj
-  checklist.estado = nuevo_estado
+    actividades_raw = [a.descripcion for a in plantilla.actividades]
+    actividades_evaluadas = []
 
-  if hasattr(checklist, "encargado_taller"):
-    checklist.encargado_taller = encargado_taller
-  if hasattr(checklist, "actividades_json"):
-    checklist.actividades_json = json.dumps(
-        actividades_evaluadas, ensure_ascii=False
+    for idx, act in enumerate(actividades_raw):
+        alumno = form_data.get(f"alumno_{idx}", "")
+        estado_eval = form_data.get(f"estado_{idx}", "CONFORME")
+        observacion = form_data.get(f"obs_{idx}", "")
+
+        actividades_evaluadas.append({
+            "actividad": act,
+            "alumno_encargado": alumno,
+            "estado": estado_eval,
+            "observaciones": observacion,
+        })
+
+    rut_docente = (
+        docente.split("(")[-1].replace(")", "").strip()
+        if docente and "(" in docente
+        else docente
+    )
+    codigo_seccion = (
+        clase.split(" - ")[0].strip() if clase and " - " in clase else clase
+    )
+    fecha_obj = (
+        datetime.strptime(fecha_str, "%Y-%m-%d").date() if fecha_str else None
+    )
+    nuevo_estado = "FINALIZADO" if accion == "finalizar" else "BORRADOR"
+
+    if checklist_id and checklist_id.strip():
+        checklist = (
+            db.query(models.Checklist)
+            .filter(models.Checklist.id == int(checklist_id))
+            .first()
+        )
+        if not checklist:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Checklist no encontrado",
+            )
+    else:
+        checklist = models.Checklist()
+        db.add(checklist)
+
+    checklist.taller = taller_id
+    checklist.rut_docente = rut_docente or docente
+    checklist.codigo_seccion = codigo_seccion or clase
+    checklist.fecha = fecha_obj
+    checklist.estado = nuevo_estado
+
+    if hasattr(checklist, "encargado_taller"):
+        checklist.encargado_taller = encargado_taller
+    if hasattr(checklist, "actividades_json"):
+        checklist.actividades_json = json.dumps(
+            actividades_evaluadas, ensure_ascii=False
+        )
+
+    try:
+        db.commit()
+        db.refresh(checklist)
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error(f"Error en BD al guardar checklist: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error de base de datos al guardar el checklist: {str(e)}",
+        )
+
+    if nuevo_estado == "FINALIZADO":
+        return RedirectResponse(
+            url="/?msg=finalizado", status_code=status.HTTP_303_SEE_OTHER
+        )
+    else:
+        return RedirectResponse(
+            url=f"/checklist/editar/{checklist.id}?msg=borrador_guardado",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+
+# ==========================================
+# RUTAS DEL PANEL DE ADMINISTRACIÓN
+# ==========================================
+
+@app.get("/admin", response_class=HTMLResponse, tags=["Panel de Administración"])
+async def admin_panel(
+    request: Request,
+    rut_docente: Optional[str] = Query(None),
+    estado: Optional[str] = Query(None),
+    taller_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Vista principal del panel administrativo con filtros por docente, taller y estado."""
+    query = db.query(models.Checklist)
+
+    if rut_docente and rut_docente.strip():
+        query = query.filter(models.Checklist.rut_docente == rut_docente.strip())
+    if estado and estado.strip():
+        query = query.filter(models.Checklist.estado == estado.strip())
+    if taller_id and taller_id.strip():
+        query = query.filter(models.Checklist.taller == taller_id.strip())
+
+    checklists = query.order_by(models.Checklist.fecha_creacion.desc()).all()
+    docentes = db.query(models.Docente).order_by(models.Docente.nombre).all()
+    plantillas = db.query(models.Plantilla).all()
+
+    total_registros = len(checklists)
+    total_finalizados = sum(1 for c in checklists if c.estado == "FINALIZADO")
+    total_borradores = sum(1 for c in checklists if c.estado == "BORRADOR")
+
+    return templates.TemplateResponse(
+        request=request,
+        name="admin.html",
+        context={
+            "checklists": checklists,
+            "docentes": docentes,
+            "plantillas": plantillas,
+            "filtro_docente": rut_docente,
+            "filtro_estado": estado,
+            "filtro_taller": taller_id,
+            "kpi": {
+                "total": total_registros,
+                "finalizados": total_finalizados,
+                "borradores": total_borradores,
+            },
+        },
     )
 
-  try:
-    db.commit()
-    db.refresh(checklist)
-  except SQLAlchemyError as e:
-    db.rollback()
-    logger.error(f"Error en BD al guardar checklist: {e}")
-    raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"Error de base de datos al guardar el checklist: {str(e)}",
+
+@app.get("/admin/export/excel", tags=["Panel de Administración"])
+async def export_excel(
+    rut_docente: Optional[str] = Query(None),
+    estado: Optional[str] = Query(None),
+    taller_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Genera y descarga un reporte en formato Excel (.xlsx) aplicando los filtros vigentes."""
+    query = db.query(models.Checklist)
+
+    if rut_docente and rut_docente.strip():
+        query = query.filter(models.Checklist.rut_docente == rut_docente.strip())
+    if estado and estado.strip():
+        query = query.filter(models.Checklist.estado == estado.strip())
+    if taller_id and taller_id.strip():
+        query = query.filter(models.Checklist.taller == taller_id.strip())
+
+    checklists = query.order_by(models.Checklist.fecha_creacion.desc()).all()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Reporte Aseo Gastronomía"
+
+    headers = [
+        "ID", "Taller", "RUT Docente", "Sección", 
+        "Encargado Taller", "Fecha", "Estado", "Fecha Registro"
+    ]
+    ws.append(headers)
+
+    for c in checklists:
+        ws.append([
+            c.id,
+            c.taller,
+            c.rut_docente,
+            c.codigo_seccion,
+            getattr(c, "encargado_taller", None) or "N/A",
+            str(c.fecha) if c.fecha else "N/A",
+            c.estado,
+            c.fecha_creacion.strftime("%Y-%m-%d %H:%M") if c.fecha_creacion else "N/A"
+        ])
+
+    stream = io.BytesIO()
+    wb.save(stream)
+    stream.seek(0)
+
+    filename = f"reporte_aseo_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    return StreamingResponse(
+        stream,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
-  if nuevo_estado == "FINALIZADO":
-    return RedirectResponse(
-        url="/?msg=finalizado", status_code=status.HTTP_303_SEE_OTHER
+
+@app.get("/admin/export/pdf/{checklist_id}", tags=["Panel de Administración"])
+async def export_pdf(checklist_id: int, db: Session = Depends(get_db)):
+    """Genera y descarga un informe individual en formato PDF para un checklist específico."""
+    c = db.query(models.Checklist).filter(models.Checklist.id == checklist_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Checklist no encontrado")
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36
     )
-  else:
-    return RedirectResponse(
-        url=f"/checklist/editar/{checklist.id}?msg=borrador_guardado",
-        status_code=status.HTTP_303_SEE_OTHER,
+    styles = getSampleStyleSheet()
+    story = []
+
+    title_style = ParagraphStyle(
+        "CustomTitle",
+        parent=styles["Heading1"],
+        fontSize=16,
+        textColor=colors.HexColor("#0d6efd"),
+        spaceAfter=12,
+    )
+    story.append(Paragraph(f"Informe de Checklist de Aseo - #{c.id}", title_style))
+    story.append(Spacer(1, 10))
+
+    info_data = [
+        [
+            Paragraph("<b>Taller:</b>", styles["Normal"]), Paragraph(str(c.taller), styles["Normal"]),
+            Paragraph("<b>Estado:</b>", styles["Normal"]), Paragraph(str(c.estado), styles["Normal"])
+        ],
+        [
+            Paragraph("<b>Docente (RUT):</b>", styles["Normal"]), Paragraph(str(c.rut_docente), styles["Normal"]),
+            Paragraph("<b>Sección:</b>", styles["Normal"]), Paragraph(str(c.codigo_seccion), styles["Normal"])
+        ],
+        [
+            Paragraph("<b>Encargado Taller:</b>", styles["Normal"]), Paragraph(str(getattr(c, "encargado_taller", "") or "N/A"), styles["Normal"]),
+            Paragraph("<b>Fecha Registro:</b>", styles["Normal"]), Paragraph(str(c.fecha or "N/A"), styles["Normal"])
+        ]
+    ]
+    t_info = Table(info_data, colWidths=[110, 150, 110, 150])
+    t_info.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8f9fa")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#dee2e6")),
+        ("PADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(t_info)
+    story.append(Spacer(1, 15))
+
+    story.append(Paragraph("<b>Detalle de Actividades Evaluadas:</b>", styles["Heading2"]))
+    story.append(Spacer(1, 8))
+
+    headers_act = [
+        Paragraph("<b>Actividad</b>", styles["Normal"]),
+        Paragraph("<b>Alumno Responsable</b>", styles["Normal"]),
+        Paragraph("<b>Estado</b>", styles["Normal"]),
+        Paragraph("<b>Observaciones</b>", styles["Normal"])
+    ]
+    act_rows = [headers_act]
+
+    actividades_data = []
+    if hasattr(c, "actividades_json") and c.actividades_json:
+        try:
+            actividades_data = json.loads(c.actividades_json)
+        except Exception as e:
+            logger.error(f"Error parseando JSON de actividades para PDF: {e}")
+
+    if actividades_data and isinstance(actividades_data, list):
+        for item in actividades_data:
+            act_desc = item.get("actividad", "N/A")
+            alumno = item.get("alumno_encargado", "N/A") or "N/A"
+            est = item.get("estado", "N/A")
+            obs = item.get("observaciones", "-") or "-"
+            act_rows.append([
+                Paragraph(str(act_desc), styles["Normal"]),
+                Paragraph(str(alumno), styles["Normal"]),
+                Paragraph(str(est), styles["Normal"]),
+                Paragraph(str(obs), styles["Normal"])
+            ])
+    else:
+        act_rows.append([
+            Paragraph("Sin detalle de actividades registradas", styles["Normal"]),
+            Paragraph("-", styles["Normal"]),
+            Paragraph("-", styles["Normal"]),
+            Paragraph("-", styles["Normal"])
+        ])
+
+    t_act = Table(act_rows, colWidths=[160, 120, 90, 150])
+    t_act.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0d6efd")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
+        ("PADDING", (0, 0), (-1, -1), 5),
+    ]))
+    story.append(t_act)
+
+    doc.build(story)
+    buffer.seek(0)
+
+    filename = f"Checklist_{c.id}.pdf"
+    return StreamingResponse(
+        buffer,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        media_type="application/pdf",
     )
 
 
@@ -335,53 +535,38 @@ async def guardar_checklist(request: Request, db: Session = Depends(get_db)):
 # ENDPOINTS API REST (Selectores Dinámicos)
 # ==========================================
 
-
-@app.get(
-    "/api/docentes", response_model=List[DocenteOut], tags=["API Selectores"]
-)
+@app.get("/api/docentes", response_model=List[DocenteOut], tags=["API Selectores"])
 def obtener_docentes(db: Session = Depends(get_db)):
-  """Retorna el listado de docentes ordenados por nombre."""
-  return db.query(models.Docente).order_by(models.Docente.nombre).all()
+    """Retorna el listado de docentes ordenados por nombre."""
+    return db.query(models.Docente).order_by(models.Docente.nombre).all()
 
 
-@app.get(
-    "/api/docentes/{rut_docente}/secciones",
-    response_model=List[SeccionOut],
-    tags=["API Selectores"],
-)
-def obtener_secciones_por_docente(
-    rut_docente: str, db: Session = Depends(get_db)
-):
-  """Obtiene las secciones asignadas a un docente según su RUT."""
-  secciones = (
-      db.query(models.Seccion)
-      .filter(models.Seccion.rut_docente == rut_docente)
-      .order_by(models.Seccion.nombre_asignatura)
-      .all()
-  )
-  return [
-      {
-          "cod_asignatura": s.cod_asignatura or "",
-          "asignatura": s.nombre_asignatura,
-          "seccion": s.codigo_seccion,
-      }
-      for s in secciones
-  ]
+@app.get("/api/docentes/{rut_docente}/secciones", response_model=List[SeccionOut], tags=["API Selectores"])
+def obtener_secciones_por_docente(rut_docente: str, db: Session = Depends(get_db)):
+    """Obtiene las secciones asignadas a un docente según su RUT."""
+    secciones = (
+        db.query(models.Seccion)
+        .filter(models.Seccion.rut_docente == rut_docente)
+        .order_by(models.Seccion.nombre_asignatura)
+        .all()
+    )
+    return [
+        {
+            "cod_asignatura": s.cod_asignatura or "",
+            "asignatura": s.nombre_asignatura,
+            "seccion": s.codigo_seccion,
+        }
+        for s in secciones
+    ]
 
 
-@app.get(
-    "/api/secciones/{seccion_id}/alumnos",
-    response_model=List[AlumnoOut],
-    tags=["API Selectores"],
-)
-def obtener_alumnos_por_seccion(
-    seccion_id: str, db: Session = Depends(get_db)
-):
-  """Obtiene el listado de alumnos inscritos en una sección dada."""
-  alumnos = (
-      db.query(models.AlumnoInscrito)
-      .filter(models.AlumnoInscrito.seccion == seccion_id)
-      .order_by(models.AlumnoInscrito.nombre_alumno)
-      .all()
-  )
-  return [{"rut": a.rut_alumno, "nombre": a.nombre_alumno} for a in alumnos]
+@app.get("/api/secciones/{seccion_id}/alumnos", response_model=List[AlumnoOut], tags=["API Selectores"])
+def obtener_alumnos_por_seccion(seccion_id: str, db: Session = Depends(get_db)):
+    """Obtiene el listado de alumnos inscritos en una sección dada."""
+    alumnos = (
+        db.query(models.AlumnoInscrito)
+        .filter(models.AlumnoInscrito.seccion == seccion_id)
+        .order_by(models.AlumnoInscrito.nombre_alumno)
+        .all()
+    )
+    return [{"rut": a.rut_alumno, "nombre": a.nombre_alumno} for a in alumnos]
