@@ -36,6 +36,21 @@ os.makedirs("static", exist_ok=True)
 
 
 # ==========================================
+# LISTAS FIJAS DE USUARIOS / PERSONAL
+# ==========================================
+PANOLEROS = [
+    "Gabriela Castillo",
+    "Carlos Cifuentes",
+    "Elena Castillo",
+    "Ruth Medina",
+]
+
+DOCENTES_Y_ENCARGADOS = [
+    "Hernandez Vidal Miguel Francisco",
+]
+
+
+# ==========================================
 # INICIALIZACIÓN DE FIREBASE FIRESTORE
 # ==========================================
 db_firestore = None
@@ -254,6 +269,7 @@ async def nuevo_checklist(request: Request, taller_id: str, db: Session = Depend
             "checklist": None,
             "checklist_json": None,
             "fecha_actual": fecha_actual,
+            "docentes_lista": DOCENTES_Y_ENCARGADOS,
         },
     )
 
@@ -302,6 +318,7 @@ async def editar_checklist(request: Request, checklist_id: int, db: Session = De
                 if checklist.fecha
                 else datetime.now().strftime("%Y-%m-%d")
             ),
+            "docentes_lista": DOCENTES_Y_ENCARGADOS,
         },
     )
 
@@ -409,7 +426,11 @@ async def vista_revision_panol(checklist_id: int, request: Request, db: Session 
     return templates.TemplateResponse(
         request=request,
         name="revision_panol.html",
-        context={"checklist": checklist, "actividades": actividades}
+        context={
+            "checklist": checklist,
+            "actividades": actividades,
+            "panoleros_lista": PANOLEROS,
+        }
     )
 
 
