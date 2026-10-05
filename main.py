@@ -368,6 +368,8 @@ async def guardar_checklist(request: Request, db: Session = Depends(get_db)):
         checklist.encargado_taller = encargado_taller
     if hasattr(checklist, "actividades_json"):
         checklist.actividades_json = json.dumps(actividades_evaluadas, ensure_ascii=False)
+    if hasattr(checklist, "fecha_actualizacion"):
+        checklist.fecha_actualizacion = datetime.now()
 
     try:
         db.commit()
@@ -445,6 +447,8 @@ async def aprobar_revision_panol(
         checklist.fecha_revision_panolero = datetime.now()
     if hasattr(checklist, "actividades_json"):
         checklist.actividades_json = json.dumps(actividades_actualizadas, ensure_ascii=False)
+    if hasattr(checklist, "fecha_actualizacion"):
+        checklist.fecha_actualizacion = datetime.now()
 
     checklist.estado = "FINALIZADO"
 
@@ -567,7 +571,11 @@ async def export_excel(
 
     for c in checklists:
         f_rev = getattr(c, "fecha_revision_panolero", None)
+<<<<<<< HEAD
         f_creac = getattr(c, "fecha_creacion", None)
+=======
+        f_crea = getattr(c, "fecha_creacion", None)
+>>>>>>> 54ec077 (Actualizacion de doble checklist de pañol)
         ws.append([
             c.id,
             c.taller,
@@ -579,7 +587,11 @@ async def export_excel(
             getattr(c, "nombre_panolero", None) or "N/A",
             getattr(c, "observacion_panolero", None) or "N/A",
             f_rev.strftime("%Y-%m-%d %H:%M") if f_rev else "N/A",
+<<<<<<< HEAD
             f_creac.strftime("%Y-%m-%d %H:%M") if f_creac else "N/A"
+=======
+            f_crea.strftime("%Y-%m-%d %H:%M") if f_crea else "N/A"
+>>>>>>> 54ec077 (Actualizacion de doble checklist de pañol)
         ])
 
     # Auto-ajuste de ancho de columnas
