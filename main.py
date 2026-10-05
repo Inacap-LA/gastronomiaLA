@@ -9,6 +9,7 @@ from typing import List, Optional, Any, Dict
 import firebase_admin
 from firebase_admin import credentials, firestore
 from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill
 from pydantic import BaseModel, ConfigDict
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
@@ -26,7 +27,7 @@ from database import engine, get_db
 import models
 
 # ==========================================
-# CONFIGURACIÓN DE LOGGING
+# CONFIGURACIÓN DE LOGGING Y DIRECTORIOS
 # ==========================================
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("gastronomia")
@@ -41,19 +42,27 @@ db_firestore = None
 try:
     if not firebase_admin._apps:
         firebase_json_str = os.getenv("FIREBASE_CREDENTIALS")
+        cred_path = os.getenv("FIREBASE_CREDENTIALS_PATH")
+
         if firebase_json_str:
-            # Producción (Render)
+            # Entornos como Render (JSON inyectado por Variable de Entorno)
             cred_dict = json.loads(firebase_json_str)
             cred = credentials.Certificate(cred_dict)
             firebase_admin.initialize_app(cred)
-            logger.info("Firebase inicializado con FIREBASE_CREDENTIALS (Render/Producción).")
+            logger.info("Firebase inicializado desde variable de entorno FIREBASE_CREDENTIALS.")
+        elif cred_path and os.path.exists(cred_path):
+            # Entornos con archivo local / PythonAnywhere (credentials.json)
+            cred = credentials.Certificate(cred_path)
+            firebase_admin.initialize_app(cred)
+            logger.info(f"Firebase inicializado desde archivo: {cred_path}")
         else:
-            # Desarrollo Local (gcloud ADC)
+            # Desarrollo Local (gcloud Application Default Credentials)
             firebase_admin.initialize_app()
-            logger.info("Firebase inicializado con credenciales locales de gcloud (ADC).")
+            logger.info("Firebase inicializado con credenciales por defecto de gcloud (ADC).")
+            
     db_firestore = firestore.client()
 except Exception as e:
-    logger.warning(f"No se pudo inicializar Firebase Admin SDK: {e}")
+    logger.warning(f"No se pudo inicializar Firebase Admin SDK (modo local o fallback activo): {e}")
 
 
 # ==========================================
@@ -61,13 +70,13 @@ except Exception as e:
 # ==========================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manejador del ciclo de vida de la aplicación."""
+    """Manejador del ciclo de vida para verificar/crear tablas al arrancar."""
     if engine:
         try:
             models.Base.metadata.create_all(bind=engine)
             logger.info("Tablas de la BD verificadas/creadas exitosamente.")
         except Exception as e:
-            logger.error(f"Error al inicializar la base de datos en arranque: {e}")
+            logger.error(f"Error al inicializar la base de datos en el arranque: {e}")
     yield
 
 
@@ -77,12 +86,24 @@ app = FastAPI(
         "Sistema para registro de checklist de aseo, control de talleres, "
         "gestión de borrador/pendientes de revisión, aprobación por Pañol y exportación de reportes."
     ),
-    version="1.8.0",
+    version="1.8.5",
     lifespan=lifespan,
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+
+
+# ==========================================
+# ADAPTADOR WSGI PARA PYTHONANYWHERE
+# ==========================================
+try:
+    from a2wsgi import ASGItoWSGI
+    wsgi_app = ASGItoWSGI(app)
+    logger.info("Adaptador WSGI (a2wsgi) cargado correctamente para soporte de PythonAnywhere.")
+except ImportError:
+    wsgi_app = None
+    logger.info("a2wsgi no está instalado; ejecutando en modo nativo ASGI.")
 
 
 # ==========================================
@@ -93,13 +114,13 @@ def parse_date(date_str: Optional[str]) -> Optional[date]:
     if not date_str:
         return None
     try:
-        return datetime.strptime(date_str, "%Y-%m-%d").date()
+        return datetime.strptime(date_str.strip(), "%Y-%m-%d").date()
     except ValueError:
         return None
 
 
 def safe_json_loads(json_data: Any) -> List[Dict]:
-    """Carga de manera segura strings JSON."""
+    """Carga de manera segura estructuras o cadenas JSON."""
     if not json_data:
         return []
     if isinstance(json_data, list):
@@ -111,19 +132,22 @@ def safe_json_loads(json_data: Any) -> List[Dict]:
 
 
 def obtener_plantillas(db: Session) -> List[Dict]:
-    """Obtiene las plantillas desde SQL o cae a Firestore si SQL está vacío."""
-    plantillas_db = db.query(models.Plantilla).all()
-    if plantillas_db:
-        return [
-            {
-                "id": p.id,
-                "nombre": p.nombre,
-                "actividades": [a.descripcion for a in p.actividades],
-            }
-            for p in plantillas_db
-        ]
+    """Obtiene las plantillas desde SQL o cae a Firestore como fallback."""
+    try:
+        plantillas_db = db.query(models.Plantilla).all()
+        if plantillas_db:
+            return [
+                {
+                    "id": p.id,
+                    "nombre": p.nombre,
+                    "actividades": [a.descripcion for a in p.actividades],
+                }
+                for p in plantillas_db
+            ]
+    except SQLAlchemyError as e:
+        logger.error(f"Error al consultar plantillas en SQL: {e}")
 
-    # Fallback: Consultar Firestore
+    # Fallback a Firestore
     if db_firestore:
         try:
             docs = db_firestore.collection("plantillas").stream()
@@ -144,7 +168,7 @@ def obtener_plantillas(db: Session) -> List[Dict]:
 
 
 # ==========================================
-# ESQUEMAS PYDANTIC (Pydantic V2)
+# ESQUEMAS PYDANTIC (V2)
 # ==========================================
 class DocenteOut(BaseModel):
     rut: str
@@ -179,7 +203,7 @@ async def index(request: Request, db: Session = Depends(get_db)):
 
     checklists_db = (
         db.query(models.Checklist)
-        .order_by(models.Checklist.fecha_actualizacion.desc())
+        .order_by(models.Checklist.fecha_creacion.desc())
         .limit(15)
         .all()
     )
@@ -199,7 +223,7 @@ async def index(request: Request, db: Session = Depends(get_db)):
             "actividades": actividades,
             "fecha_actualizacion": (
                 c.fecha_actualizacion.strftime("%Y-%m-%d %H:%M")
-                if c.fecha_actualizacion
+                if getattr(c, "fecha_actualizacion", None)
                 else ""
             ),
         })
@@ -215,7 +239,7 @@ async def index(request: Request, db: Session = Depends(get_db)):
 async def nuevo_checklist(request: Request, taller_id: str, db: Session = Depends(get_db)):
     """Vista de formulario para crear un nuevo checklist."""
     plantillas = obtener_plantillas(db)
-    plantilla = next((p for p in plantillas if p["id"] == taller_id), None)
+    plantilla = next((p for p in plantillas if str(p["id"]) == str(taller_id)), None)
 
     if not plantilla:
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
@@ -242,7 +266,7 @@ async def editar_checklist(request: Request, checklist_id: int, db: Session = De
         raise HTTPException(status_code=404, detail="Checklist no encontrado")
 
     plantillas = obtener_plantillas(db)
-    plantilla = next((p for p in plantillas if p["id"] == checklist.taller), None)
+    plantilla = next((p for p in plantillas if str(p["id"]) == str(checklist.taller)), None)
     
     taller_nombre = plantilla["nombre"] if plantilla else f"Taller {checklist.taller}"
     actividades_base = plantilla["actividades"] if plantilla else []
@@ -287,16 +311,16 @@ async def guardar_checklist(request: Request, db: Session = Depends(get_db)):
     """Procesa el guardado como Borrador o el envío para Revisión de Pañol."""
     form_data = await request.form()
 
-    checklist_id = form_data.get("checklist_id")
+    raw_checklist_id = form_data.get("checklist_id")
     taller_id = form_data.get("taller_id")
-    docente = form_data.get("docente")
-    clase = form_data.get("clase")
+    docente = form_data.get("docente", "")
+    clase = form_data.get("clase", "")
     fecha_str = form_data.get("fecha")
-    encargado_taller = form_data.get("encargado_taller")
+    encargado_taller = form_data.get("encargado_taller", "")
     accion = form_data.get("accion", "borrador")
 
     plantillas = obtener_plantillas(db)
-    plantilla = next((p for p in plantillas if p["id"] == taller_id), None)
+    plantilla = next((p for p in plantillas if str(p["id"]) == str(taller_id)), None)
     if not plantilla:
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -322,11 +346,15 @@ async def guardar_checklist(request: Request, db: Session = Depends(get_db)):
     else:
         nuevo_estado = "BORRADOR"
 
-    if checklist_id and checklist_id.strip():
-        checklist = db.query(models.Checklist).filter(models.Checklist.id == int(checklist_id)).first()
-        if not checklist:
-            raise HTTPException(status_code=404, detail="Checklist no encontrado")
-    else:
+    checklist = None
+    if raw_checklist_id and raw_checklist_id.strip():
+        try:
+            cid_int = int(raw_checklist_id.strip())
+            checklist = db.query(models.Checklist).filter(models.Checklist.id == cid_int).first()
+        except ValueError:
+            pass
+
+    if not checklist:
         checklist = models.Checklist()
         db.add(checklist)
 
@@ -349,7 +377,7 @@ async def guardar_checklist(request: Request, db: Session = Depends(get_db)):
         logger.error(f"Error en BD al guardar checklist: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error de base de datos al guardar el checklist: {str(e)}",
+            detail="Error de base de datos al guardar el checklist.",
         )
 
     if nuevo_estado == "PENDIENTE_REVISION":
@@ -389,10 +417,10 @@ async def aprobar_revision_panol(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    """Registra la revisión ítem por ítem del Pañolero (Doble Checklist) y finaliza el registro."""
+    """Registra la revisión del Pañolero (Doble Checklist) y finaliza el registro."""
     form_data = await request.form()
-    nombre_panolero = form_data.get("nombre_panolero")
-    observacion_panolero = form_data.get("observacion_panolero")
+    nombre_panolero = form_data.get("nombre_panolero", "")
+    observacion_panolero = form_data.get("observacion_panolero", "")
 
     checklist = db.query(models.Checklist).filter(models.Checklist.id == checklist_id).first()
     if not checklist:
@@ -401,7 +429,6 @@ async def aprobar_revision_panol(
     actividades_docente = safe_json_loads(getattr(checklist, "actividades_json", None))
     actividades_actualizadas = []
 
-    # Procesa la verificación del Pañolero conservando lo declarado por el Docente
     for idx, item in enumerate(actividades_docente):
         estado_panol = form_data.get(f"estado_panol_{idx}", "CONFORME")
         obs_panol = form_data.get(f"obs_panol_{idx}", "")
@@ -443,7 +470,7 @@ async def admin_panel(
     taller_id: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """Panel de administración con métricas y filtros."""
+    """Panel de administración con métricas KPI y filtros."""
     query = db.query(models.Checklist)
 
     if rut_docente and rut_docente.strip():
@@ -484,7 +511,7 @@ async def admin_panel(
 
 @app.post("/admin/eliminar/{checklist_id}", tags=["Panel de Administración"])
 async def eliminar_checklist(checklist_id: int, db: Session = Depends(get_db)):
-    """Elimina permanentemente un checklist de la base de datos."""
+    """Elimina un checklist de la base de datos."""
     checklist = db.query(models.Checklist).filter(models.Checklist.id == checklist_id).first()
     if not checklist:
         raise HTTPException(status_code=404, detail="Checklist no encontrado")
@@ -507,7 +534,7 @@ async def export_excel(
     taller_id: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """Genera un reporte detallado en Excel (.xlsx) con auto-ajuste de columnas."""
+    """Genera un reporte detallado en Excel (.xlsx) con auto-ajuste y formato profesional."""
     query = db.query(models.Checklist)
 
     if rut_docente and rut_docente.strip():
@@ -530,8 +557,17 @@ async def export_excel(
     ]
     ws.append(headers)
 
+    # Estilos de cabecera
+    header_fill = PatternFill(start_color="0D6EFD", end_color="0D6EFD", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True)
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
     for c in checklists:
         f_rev = getattr(c, "fecha_revision_panolero", None)
+        f_creac = getattr(c, "fecha_creacion", None)
         ws.append([
             c.id,
             c.taller,
@@ -543,14 +579,14 @@ async def export_excel(
             getattr(c, "nombre_panolero", None) or "N/A",
             getattr(c, "observacion_panolero", None) or "N/A",
             f_rev.strftime("%Y-%m-%d %H:%M") if f_rev else "N/A",
-            c.fecha_creacion.strftime("%Y-%m-%d %H:%M") if c.fecha_creacion else "N/A"
+            f_creac.strftime("%Y-%m-%d %H:%M") if f_creac else "N/A"
         ])
 
     # Auto-ajuste de ancho de columnas
     for col in ws.columns:
         max_len = max(len(str(cell.value or '')) for cell in col)
         col_letter = col[0].column_letter
-        ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+        ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
 
     stream = io.BytesIO()
     wb.save(stream)
@@ -585,30 +621,37 @@ async def export_pdf(checklist_id: int, db: Session = Depends(get_db)):
         textColor=colors.HexColor("#0d6efd"),
         spaceAfter=12,
     )
+    cell_style = ParagraphStyle(
+        "CellText",
+        parent=styles["Normal"],
+        fontSize=9,
+        leading=11
+    )
+
     story.append(Paragraph(f"Informe Auditado de Checklist - #{c.id}", title_style))
     story.append(Spacer(1, 10))
 
     f_rev = getattr(c, "fecha_revision_panolero", None)
     info_data = [
         [
-            Paragraph("<b>Taller:</b>", styles["Normal"]), Paragraph(str(c.taller), styles["Normal"]),
-            Paragraph("<b>Estado:</b>", styles["Normal"]), Paragraph(str(c.estado), styles["Normal"])
+            Paragraph("<b>Taller:</b>", cell_style), Paragraph(str(c.taller), cell_style),
+            Paragraph("<b>Estado:</b>", cell_style), Paragraph(str(c.estado), cell_style)
         ],
         [
-            Paragraph("<b>Docente (RUT):</b>", styles["Normal"]), Paragraph(str(c.rut_docente), styles["Normal"]),
-            Paragraph("<b>Sección:</b>", styles["Normal"]), Paragraph(str(c.codigo_seccion), styles["Normal"])
+            Paragraph("<b>Docente (RUT):</b>", cell_style), Paragraph(str(c.rut_docente), cell_style),
+            Paragraph("<b>Sección:</b>", cell_style), Paragraph(str(c.codigo_seccion), cell_style)
         ],
         [
-            Paragraph("<b>Encargado Taller:</b>", styles["Normal"]), Paragraph(str(getattr(c, "encargado_taller", "") or "N/A"), styles["Normal"]),
-            Paragraph("<b>Fecha Checklist:</b>", styles["Normal"]), Paragraph(str(c.fecha or "N/A"), styles["Normal"])
+            Paragraph("<b>Encargado Taller:</b>", cell_style), Paragraph(str(getattr(c, "encargado_taller", "") or "N/A"), cell_style),
+            Paragraph("<b>Fecha Checklist:</b>", cell_style), Paragraph(str(c.fecha or "N/A"), cell_style)
         ],
         [
-            Paragraph("<b>Pañolero A Cargo:</b>", styles["Normal"]), Paragraph(str(getattr(c, "nombre_panolero", "") or "Pendiente"), styles["Normal"]),
-            Paragraph("<b>Fecha Revisión Pañol:</b>", styles["Normal"]), Paragraph(f_rev.strftime("%Y-%m-%d %H:%M") if f_rev else "Pendiente", styles["Normal"])
+            Paragraph("<b>Pañolero A Cargo:</b>", cell_style), Paragraph(str(getattr(c, "nombre_panolero", "") or "Pendiente"), cell_style),
+            Paragraph("<b>Fecha Revisión Pañol:</b>", cell_style), Paragraph(f_rev.strftime("%Y-%m-%d %H:%M") if f_rev else "Pendiente", cell_style)
         ],
         [
-            Paragraph("<b>Obs. General Pañol:</b>", styles["Normal"]), Paragraph(str(getattr(c, "observacion_panolero", "") or "Sin observaciones"), styles["Normal"]),
-            Paragraph("<b>-</b>", styles["Normal"]), Paragraph("-", styles["Normal"])
+            Paragraph("<b>Obs. General Pañol:</b>", cell_style), Paragraph(str(getattr(c, "observacion_panolero", "") or "Sin observaciones"), cell_style),
+            Paragraph("", cell_style), Paragraph("", cell_style)
         ]
     ]
     t_info = Table(info_data, colWidths=[110, 150, 110, 150])
@@ -623,12 +666,13 @@ async def export_pdf(checklist_id: int, db: Session = Depends(get_db)):
     story.append(Paragraph("<b>Detalle de Actividades Evaluadas (Doble Checklist):</b>", styles["Heading2"]))
     story.append(Spacer(1, 8))
 
+    header_style = ParagraphStyle("HeaderStyle", parent=cell_style, textColor=colors.white, fontName="Helvetica-Bold")
     headers_act = [
-        Paragraph("<b>Actividad</b>", styles["Normal"]),
-        Paragraph("<b>Alumno Responsable</b>", styles["Normal"]),
-        Paragraph("<b>Estado Docente</b>", styles["Normal"]),
-        Paragraph("<b>Estado Pañol</b>", styles["Normal"]),
-        Paragraph("<b>Obs. Pañol</b>", styles["Normal"])
+        Paragraph("Actividad", header_style),
+        Paragraph("Alumno Responsable", header_style),
+        Paragraph("Estado Docente", header_style),
+        Paragraph("Estado Pañol", header_style),
+        Paragraph("Obs. Pañol", header_style)
     ]
     act_rows = [headers_act]
 
@@ -637,25 +681,24 @@ async def export_pdf(checklist_id: int, db: Session = Depends(get_db)):
     if actividades_data:
         for item in actividades_data:
             act_rows.append([
-                Paragraph(str(item.get("actividad", "N/A")), styles["Normal"]),
-                Paragraph(str(item.get("alumno_encargado", "N/A") or "N/A"), styles["Normal"]),
-                Paragraph(str(item.get("estado", "N/A")), styles["Normal"]),
-                Paragraph(str(item.get("estado_panol", "Pendiente")), styles["Normal"]),
-                Paragraph(str(item.get("obs_panol", "-") or "-"), styles["Normal"])
+                Paragraph(str(item.get("actividad", "N/A")), cell_style),
+                Paragraph(str(item.get("alumno_encargado", "N/A") or "N/A"), cell_style),
+                Paragraph(str(item.get("estado", "N/A")), cell_style),
+                Paragraph(str(item.get("estado_panol", "Pendiente")), cell_style),
+                Paragraph(str(item.get("obs_panol", "-") or "-"), cell_style)
             ])
     else:
         act_rows.append([
-            Paragraph("Sin detalle de actividades registradas", styles["Normal"]),
-            Paragraph("-", styles["Normal"]),
-            Paragraph("-", styles["Normal"]),
-            Paragraph("-", styles["Normal"]),
-            Paragraph("-", styles["Normal"])
+            Paragraph("Sin detalle de actividades registradas", cell_style),
+            Paragraph("-", cell_style),
+            Paragraph("-", cell_style),
+            Paragraph("-", cell_style),
+            Paragraph("-", cell_style)
         ])
 
-    t_act = Table(act_rows, colWidths=[140, 110, 90, 90, 90])
+    t_act = Table(act_rows, colWidths=[140, 110, 85, 85, 100])
     t_act.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0d6efd")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
         ("PADDING", (0, 0), (-1, -1), 5),
     ]))
@@ -673,7 +716,7 @@ async def export_pdf(checklist_id: int, db: Session = Depends(get_db)):
 
 
 # ==========================================
-# ENDPOINTS API REST (Selectores Dinámicos)
+# ENDPOINTS API REST (SELECTORES DINÁMICOS)
 # ==========================================
 
 @app.get("/api/docentes", response_model=List[DocenteOut], tags=["API Selectores"])
