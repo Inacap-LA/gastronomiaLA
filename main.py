@@ -46,6 +46,13 @@ PANOLEROS = [
 ]
 
 DOCENTES_Y_ENCARGADOS = [
+    "Torres Torres Pedro César",
+    "Pacheco García Ricardo Alejandro",
+    "Sekul Muñoz Fernanda Andrea",
+    "Figueroa Marambio Jaime Andre",
+    "Cifuentes Rioseco Carlos Enrique",
+    "Carrillo Rubilar Danilo Rodrigo",
+    "Castro Lezano María Yasnaia Nadedsha",
     "Hernandez Vidal Miguel Francisco",
 ]
 
