@@ -115,9 +115,19 @@
                             <label for="encargado_taller" class="form-label fw-semibold small text-secondary">
                                 Encargado de Taller <span class="text-danger">*</span>
                             </label>
-                            <input type="text" id="encargado_taller" name="encargado_taller" class="form-control" 
-                                   placeholder="Nombre del encargado" 
-                                   value="{{ checklist.encargado_taller if checklist and checklist.encargado_taller else '' }}" required>
+                            <select id="encargado_taller" name="encargado_taller" class="form-select" required>
+                                <option value="">-- Seleccione Encargado --</option>
+                                {% for enc in docentes_lista %}
+                                    <option value="{{ enc }}" {% if checklist and checklist.encargado_taller == enc %}selected{% endif %}>
+                                        {{ enc }}
+                                    </option>
+                                {% endfor %}
+                                {% if checklist and checklist.encargado_taller and checklist.encargado_taller not in docentes_lista %}
+                                    <option value="{{ checklist.encargado_taller }}" selected>
+                                        {{ checklist.encargado_taller }}
+                                    </option>
+                                {% endif %}
+                            </select>
                         </div>
                     </div>
                 </div>
@@ -175,12 +185,10 @@
                     </a>
                     
                     <div class="d-flex gap-2">
-                        <!-- Guardar Borrador (Sin validación estricta de campos requeridos) -->
                         <button type="submit" id="btnBorrador" class="btn btn-warning px-4 fw-semibold text-dark">
                             <i class="bi bi-save me-1"></i> Guardar Borrador
                         </button>
                         
-                        <!-- Enviar a Pañol / Finalizar (Con validación requerida) -->
                         <button type="submit" id="btnFinalizar" class="btn btn-success px-4 fw-bold">
                             <i class="bi bi-send-check me-1"></i> Enviar a Revisión de Pañol
                         </button>
@@ -193,6 +201,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
     const checklistData = {{ checklist_json | safe if checklist_json else 'null' }};
+    const docentesPermitidos = {{ docentes_lista | tojson if docentes_lista else '[]' }};
 
     function actualizarEstiloEstado(selectEl) {
         if (selectEl.value === 'NO CONFORME') {
@@ -216,44 +225,48 @@
         // Manejo de botones de envío (Borrador vs Finalizar/Pañol)
         btnBorrador.addEventListener("click", () => {
             accionInput.value = "borrador";
-            form.novalidate = true; // Desactiva validación HTML5 para guardar borrador parcial
-            // Remover 'required' temporalmente para permitir guardado incompleto
+            form.novalidate = true;
             form.querySelectorAll("[required]").forEach(el => el.dataset.wasRequired = "true");
             form.querySelectorAll("[required]").forEach(el => el.removeAttribute("required"));
         });
 
         btnFinalizar.addEventListener("click", () => {
             accionInput.value = "enviar_panol";
-            // Restaurar atributo 'required' para validación completa
             form.querySelectorAll("[data-was-required='true']").forEach(el => el.setAttribute("required", "required"));
             form.novalidate = false;
         });
 
-        // 1. Cargar Docentes
+        // 1. Cargar Docentes (Mostrando únicamente el nombre, sin RUT)
         try {
             const resDocentes = await fetch("/api/docentes");
             if (!resDocentes.ok) throw new Error("Error al consultar docentes");
-            const docentes = await resDocentes.json();
+            const todosDocentes = await resDocentes.json();
+
+            // Filtrar docentes segun la lista fija de main.py (si aplica)
+            const docentesFiltrados = docentesPermitidos.length > 0 
+                ? todosDocentes.filter(d => docentesPermitidos.includes(d.nombre))
+                : todosDocentes;
 
             selectDocente.innerHTML = '<option value="">-- Seleccione un docente --</option>';
-            docentes.forEach(d => {
+            docentesFiltrados.forEach(d => {
                 const opt = document.createElement("option");
-                opt.value = `${d.nombre} (${d.rut})`;
-                opt.dataset.rut = d.rut;
-                opt.textContent = `${d.nombre} (${d.rut})`;
+                opt.value = d.nombre;        // Asigna el nombre como valor
+                opt.dataset.rut = d.rut;     // Conserva el RUT internamente para consultar secciones
+                opt.textContent = d.nombre;  // Muestra ÚNICAMENTE el nombre
                 selectDocente.appendChild(opt);
             });
 
-            // Re-selección si viene de un Borrador
+            // Re-selección al abrir un Borrador existente
             if (checklistData && checklistData.rut_docente) {
                 for (let opt of selectDocente.options) {
-                    if (opt.dataset.rut === checklistData.rut_docente || opt.value.includes(checklistData.rut_docente)) {
+                    if (opt.dataset.rut === checklistData.rut_docente || opt.value === checklistData.rut_docente) {
                         selectDocente.value = opt.value;
                         break;
                     }
                 }
                 if (selectDocente.value) {
-                    await cargarSecciones(checklistData.rut_docente);
+                    const optSel = selectDocente.options[selectDocente.selectedIndex];
+                    await cargarSecciones(optSel ? optSel.dataset.rut : checklistData.rut_docente);
                 }
             }
         } catch (err) {
@@ -340,8 +353,8 @@
                     } else {
                         alumnos.forEach(a => {
                             const opt = document.createElement("option");
-                            opt.value = `${a.nombre} (${a.rut})`;
-                            opt.textContent = `${a.nombre} (${a.rut})`;
+                            opt.value = a.nombre;
+                            opt.textContent = a.nombre;
                             select.appendChild(opt);
                         });
                         select.disabled = false;

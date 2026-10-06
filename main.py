@@ -513,7 +513,7 @@ async def admin_panel(
         query = query.filter(models.Checklist.taller == taller_id.strip())
 
     checklists = query.order_by(models.Checklist.fecha_creacion.desc()).all()
-    docentes = db.query(models.Docente).order_by(models.Docente.nombre).all()
+    docentes = db.query(models.Docente).filter(models.Docente.nombre.in_(DOCENTES_Y_ENCARGADOS)).order_by(models.Docente.nombre).all()
     plantillas = obtener_plantillas(db)
 
     total_registros = len(checklists)
@@ -753,7 +753,16 @@ async def export_pdf(checklist_id: int, db: Session = Depends(get_db)):
 
 @app.get("/api/docentes", response_model=List[DocenteOut], tags=["API Selectores"])
 def obtener_docentes(db: Session = Depends(get_db)):
-    """Retorna el listado de docentes ordenados por nombre."""
+    """Retorna el listado de docentes filtrados por la lista fija DOCENTES_Y_ENCARGADOS."""
+    docentes_db = (
+        db.query(models.Docente)
+        .filter(models.Docente.nombre.in_(DOCENTES_Y_ENCARGADOS))
+        .order_by(models.Docente.nombre)
+        .all()
+    )
+    if docentes_db:
+        return docentes_db
+    # Fallback si en la BD no coinciden exactamente los nombres
     return db.query(models.Docente).order_by(models.Docente.nombre).all()
 
 
