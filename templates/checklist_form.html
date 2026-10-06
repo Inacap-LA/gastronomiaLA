@@ -113,16 +113,16 @@
 
                         <div class="col-md-3">
                             <label for="encargado_taller" class="form-label fw-semibold small text-secondary">
-                                Encargado de Taller <span class="text-danger">*</span>
+                                Pañolero encargado <span class="text-danger">*</span>
                             </label>
                             <select id="encargado_taller" name="encargado_taller" class="form-select" required>
-                                <option value="">-- Seleccione Encargado --</option>
-                                {% for enc in docentes_lista %}
-                                    <option value="{{ enc }}" {% if checklist and checklist.encargado_taller == enc %}selected{% endif %}>
-                                        {{ enc }}
+                                <option value="">-- Seleccione Pañolero --</option>
+                                {% for panolero in panoleros_lista %}
+                                    <option value="{{ panolero }}" {% if checklist and checklist.encargado_taller == panolero %}selected{% endif %}>
+                                        {{ panolero }}
                                     </option>
                                 {% endfor %}
-                                {% if checklist and checklist.encargado_taller and checklist.encargado_taller not in docentes_lista %}
+                                {% if checklist and checklist.encargado_taller and checklist.encargado_taller not in panoleros_lista %}
                                     <option value="{{ checklist.encargado_taller }}" selected>
                                         {{ checklist.encargado_taller }}
                                     </option>
