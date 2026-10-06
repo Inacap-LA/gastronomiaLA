@@ -239,7 +239,7 @@ async def index(request: Request, db: Session = Depends(get_db)):
             "docente": c.rut_docente or "N/A",
             "clase": c.codigo_seccion or "N/A",
             "fecha": c.fecha.strftime("%Y-%m-%d") if c.fecha else "N/A",
-            "encargado_taller": getattr(c, "encargado_taller", "N/A") or "N/A",
+            "encargado_taller": getattr(c, "nombre_panolero", "N/A") or "N/A",
             "nombre_panolero": getattr(c, "nombre_panolero", "N/A") or "N/A",
             "estado": c.estado,
             "actividades": actividades,
@@ -308,7 +308,7 @@ async def editar_checklist(request: Request, checklist_id: int, db: Session = De
         "rut_docente": checklist.rut_docente,
         "codigo_seccion": checklist.codigo_seccion,
         "fecha": checklist.fecha.strftime("%Y-%m-%d") if checklist.fecha else "",
-        "encargado_taller": getattr(checklist, "encargado_taller", ""),
+        "encargado_taller": getattr(checklist, "nombre_panolero", ""),
         "estado": checklist.estado,
         "actividades": actividades_guardadas,
     }
@@ -340,7 +340,7 @@ async def guardar_checklist(request: Request, db: Session = Depends(get_db)):
     docente = form_data.get("docente", "")
     clase = form_data.get("clase", "")
     fecha_str = form_data.get("fecha")
-    encargado_taller = form_data.get("encargado_taller", "")
+    encargado_taller = form_data.get("nombre_panolero", "")
     accion = form_data.get("accion", "borrador")
 
     plantillas = obtener_plantillas(db)
@@ -388,8 +388,8 @@ async def guardar_checklist(request: Request, db: Session = Depends(get_db)):
     checklist.fecha = fecha_obj
     checklist.estado = nuevo_estado
 
-    if hasattr(checklist, "encargado_taller"):
-        checklist.encargado_taller = encargado_taller
+    if hasattr(checklist, "nombre_panolero"):
+        checklist.encargado_taller = nombre_panolero
     if hasattr(checklist, "actividades_json"):
         checklist.actividades_json = json.dumps(actividades_evaluadas, ensure_ascii=False)
     if hasattr(checklist, "fecha_actualizacion"):
@@ -584,7 +584,7 @@ async def export_excel(
 
     headers = [
         "ID", "Taller", "RUT Docente", "Sección", 
-        "Encargado Taller", "Fecha", "Estado", 
+        "Pañolero encargado", "Fecha", "Estado", 
         "Pañolero a Cargo", "Obs. Pañol", "Fecha Revisión Pañol", "Fecha Creación"
     ]
     ws.append(headers)
@@ -674,7 +674,7 @@ async def export_pdf(checklist_id: int, db: Session = Depends(get_db)):
             Paragraph("<b>Sección:</b>", cell_style), Paragraph(str(c.codigo_seccion), cell_style)
         ],
         [
-            Paragraph("<b>Encargado Taller:</b>", cell_style), Paragraph(str(getattr(c, "encargado_taller", "") or "N/A"), cell_style),
+            Paragraph("<b>Pañolero encargado:</b>", cell_style), Paragraph(str(getattr(c, "nombre_panolero", "") or "N/A"), cell_style),
             Paragraph("<b>Fecha Checklist:</b>", cell_style), Paragraph(str(c.fecha or "N/A"), cell_style)
         ],
         [
